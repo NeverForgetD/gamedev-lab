@@ -9,9 +9,13 @@ public struct FieldData
 
 public class SimpleDensityField : MonoBehaviour
 {
+    private static readonly int GizmoBufferProperty = Shader.PropertyToID("_GizmoBuffer");
+    private const int STRIDE = 16;  // sizeof(float3 + float)
+
     [Header("Field Properties")]
     [SerializeField] private int resolution = 16;
     [SerializeField] private float unitSize = 1f;
+    [SerializeField] private float refreshRate = 0.3f;
 
     [Header("Sphere Shape Properties")]
     [SerializeField] private float sphereRadius = 4f;
@@ -19,29 +23,82 @@ public class SimpleDensityField : MonoBehaviour
     [Header("Gizmo Settings")]
     [SerializeField] private bool showGizmos = true;
     [SerializeField] private float pointSize = 0.1f;
-    [SerializeField] private Color insideColor = new Color(0f, 1f, 0f, 0.8f);
-    [SerializeField] private Color outsideColor = new Color(1f, 0f, 0f, 0.3f);
+    [SerializeField] private Mesh gizmoMesh;
+    [SerializeField] private Material gizmoMaterial;
 
+    private Bounds bounds;
+    private ComputeBuffer gizmoBuffer;
+    private ComputeBuffer argsBuffer;
 
-    public FieldData[] DensityField { get; private set; }
+    private FieldData[] densityField;
+    private float timer;
+
+    public FieldData[] DensityField => densityField;
     public int Resolution => resolution;
     public float UnitSize => unitSize;
 
     void Start()
     {
         InitField();
-        CreateSampleSphere(new float3(resolution, resolution, resolution) * unitSize * 0.5f);
+        InitGizmo();
+    }
+
+    private void Update()
+    {
+        if (gizmoBuffer == null || gizmoMaterial == null) return;
+
+        timer += Time.deltaTime;
+        if (timer > refreshRate)
+        {
+            CreateSampleSphere(transform.position);
+            gizmoBuffer.SetData(densityField);
+            timer = 0;  // -= refreshRate보다 더 명확
+        }
+
+        Graphics.DrawMeshInstancedIndirect(gizmoMesh, 0, gizmoMaterial, bounds, argsBuffer);
     }
 
     public void InitField()
     {
         int count = resolution * resolution * resolution;
-        DensityField = new FieldData[count];
+        densityField = new FieldData[count];
 
         float3 center = new float3(resolution, resolution, resolution) * unitSize * 0.5f;
         CreateSampleSphere(center);
     }
 
+    private void InitGizmo()
+    {
+        if (gizmoMaterial == null || gizmoMesh == null) return;
+
+        int count = resolution * resolution * resolution;
+
+        // Bounds: 실제 격자 크기로 계산
+        float size = resolution * unitSize;
+        bounds = new Bounds(transform.position, new Vector3(size, size, size));
+
+        // ComputeBuffer: GPU 메모리에 데이터 할당
+        gizmoBuffer = new ComputeBuffer(count, STRIDE);
+        gizmoBuffer.SetData(densityField);
+
+        // Material: Shader와 ComputeBuffer 연결
+        gizmoMaterial.enableInstancing = true;
+        gizmoMaterial.SetBuffer(GizmoBufferProperty, gizmoBuffer);
+
+        // Indirect Args: DrawCall 정보
+        uint[] args = {
+                gizmoMesh.GetIndexCount(0),
+                (uint)count,
+                gizmoMesh.GetIndexStart(0),
+                gizmoMesh.GetBaseVertex(0),
+                0
+            };
+        argsBuffer = new ComputeBuffer(1, args.Length * sizeof(uint),
+            ComputeBufferType.IndirectArguments);
+        argsBuffer.SetData(args);
+
+        timer = 0;
+    }
 
     private void CreateSampleSphere(float3 centerPos)
     {
@@ -61,35 +118,12 @@ public class SimpleDensityField : MonoBehaviour
                 density = math.distance(pos, centerPos) - sphereRadius
             };
         }
-
     }
+    
 
-    private void OnDrawGizmos()
+    private void OnDestroy()
     {
-        if (!showGizmos || DensityField == null || DensityField.Length == 0) return;
-
-        float3 center = new float3(resolution, resolution, resolution) * unitSize * 0.5f;
-        Vector3 wolrdCenter = Vector3.zero;
-
-        Gizmos.color = Color.white;
-        Gizmos.DrawWireSphere(center, sphereRadius);
-
-        foreach (var data in DensityField)
-        {
-            if (data.density > 0)
-            {
-
-                Gizmos.color = insideColor;
-                wolrdCenter = transform.TransformPoint(data.position);
-                Gizmos.DrawSphere(wolrdCenter, pointSize);
-            }
-            else
-            {
-                Gizmos.color = outsideColor;
-                wolrdCenter = transform.TransformPoint(data.position);
-                Gizmos.DrawSphere(wolrdCenter, pointSize * 0.5f);
-            }
-        }   
+        gizmoBuffer?.Dispose();
+        argsBuffer?.Dispose();
     }
-
 }
