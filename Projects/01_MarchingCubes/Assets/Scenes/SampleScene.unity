@@ -686,14 +686,14 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: c78354a43fc52b542bb9f08b3a8b24a2, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::SimpleDensityField
-  fieldType: 0
+  fieldType: 1
   resolution: 32
   unitSize: 1
   refreshRate: 0.3
   sphereRadius: 7.5
   terrain_baseHeight: 4
   terrain_frequency: 0.3
-  terrain_amplitude: 3
+  terrain_amplitude: 2
   cave_frequency: 0.3
   cave_amplitude: 1
   cave_surfaceLevel: 0

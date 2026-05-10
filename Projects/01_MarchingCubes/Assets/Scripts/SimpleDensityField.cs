@@ -26,7 +26,7 @@ public class SimpleDensityField : MonoBehaviour
     [Header("Terrain2D Properties")]
     [SerializeField] private float terrain_baseHeight  = 4f;
     [SerializeField] private float terrain_frequency   = 0.3f;
-    [SerializeField] private float terrain_amplitude   = 3f;
+    [SerializeField] private float terrain_amplitude   = 2f;
     private int   terrain_octaves   = 4;
     private float terrain_lacunarity = 2f;
     private float terrain_gain       = 0.5f;
