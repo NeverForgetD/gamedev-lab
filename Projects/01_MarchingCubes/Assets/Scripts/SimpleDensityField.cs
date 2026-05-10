@@ -20,9 +20,7 @@ public class SimpleDensityField : MonoBehaviour
     [Header("Sphere Shape Properties")]
     [SerializeField] private float sphereRadius = 4f;
 
-    [Header("Gizmo Settings")]
-    [SerializeField] private bool showGizmos = true;
-    [SerializeField] private float pointSize = 0.1f;
+    [Header("Render Settings")]
     [SerializeField] private Mesh gizmoMesh;
     [SerializeField] private Material gizmoMaterial;
 
