@@ -686,7 +686,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: c78354a43fc52b542bb9f08b3a8b24a2, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::SimpleDensityField
-  fieldType: 1
+  fieldType: 0
   resolution: 32
   unitSize: 1
   refreshRate: 0.3
@@ -699,6 +699,7 @@ MonoBehaviour:
   cave_surfaceLevel: 0
   gizmoMesh: {fileID: 10207, guid: 0000000000000000e000000000000000, type: 0}
   gizmoMaterial: {fileID: 2100000, guid: e6957d0929cb4984b9e81c230b5d556c, type: 2}
+  showGizmos: 0
 --- !u!1660057539 &9223372036854775807
 SceneRoots:
   m_ObjectHideFlags: 0

@@ -32,16 +32,18 @@ public class SimpleDensityField : MonoBehaviour
     private float terrain_gain       = 0.5f;
 
     [Header("Cave3D Properties")]
-    [SerializeField] private float cave_frequency     = 0.3f;
-    [SerializeField] private float cave_amplitude     = 1f;
-    [SerializeField] private float cave_surfaceLevel  = 0f;
+    [SerializeField] private float cave_groundLevel  = 4f;
+    [SerializeField] private float cave_threshold    = 0.3f;
+    [SerializeField] private float cave_frequency    = 0.4f;
+    [SerializeField] private float cave_amplitude    = 1f;
     private int   cave_octaves    = 4;
     private float cave_lacunarity = 2f;
     private float cave_gain       = 0.5f;
 
-    [Header("Render Settings")]
+    [Header("Gizmos Settings")]
     [SerializeField] private Mesh gizmoMesh;
     [SerializeField] private Material gizmoMaterial;
+    [SerializeField] private bool showGizmos = true;
 
     private Bounds bounds;
     private ComputeBuffer gizmoBuffer;
@@ -72,7 +74,8 @@ public class SimpleDensityField : MonoBehaviour
             timer = 0;
         }
 
-        Graphics.DrawMeshInstancedIndirect(gizmoMesh, 0, gizmoMaterial, bounds, argsBuffer);
+        if (showGizmos)
+            Graphics.DrawMeshInstancedIndirect(gizmoMesh, 0, gizmoMaterial, bounds, argsBuffer);
     }
 
     public void InitField()
@@ -154,12 +157,17 @@ public class SimpleDensityField : MonoBehaviour
             var z = i / (resolution * resolution);
             var pos = (new float3(x, y, z) - center) * unitSize + originPos;
 
-            // 높이에 비례해 density 증가 → 위는 공기, 아래는 땅
-            // 3D 노이즈가 그 사이를 조각해 동굴/오버행 생성
+            // 지표면 SDF: 위=공기(양수), 아래=고체(음수)
+            float ground = pos.y - cave_groundLevel;
+
+            // 터널 조각: 노이즈가 0에 가까운 면을 따라 터널 생성
+            float tunnel = cave_threshold - math.abs(FBm3D(pos) * cave_amplitude);
+
+            // 둘 중 하나라도 양수(공기)면 공기, 둘 다 음수일 때만 고체
             densityField[i] = new FieldData
             {
                 position = pos,
-                density  = cave_surfaceLevel - FBm3D(pos) * cave_amplitude
+                density  = math.max(ground, tunnel)
             };
         }
     }
