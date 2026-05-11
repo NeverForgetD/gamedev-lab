@@ -8,10 +8,11 @@ public class SimpleMarchingCubeGenerator : MonoBehaviour
 
     [SerializeField] private SimpleDensityField densityField;
     [SerializeField, Range(-5f, 5f)] private float isoLevel = 0.0f;
-    [SerializeField] private float refreshRate = 0.1f;
+    [SerializeField] private float refreshRate = 5f;
     [SerializeField] private InterpolateMode interpolateMode = InterpolateMode.Linear;
 
-    private MeshFilter meshFilter;
+    private MeshFilter   meshFilter;
+    private MeshRenderer meshRenderer;
     private Mesh mesh;
     private float timer;
 
@@ -28,9 +29,24 @@ public class SimpleMarchingCubeGenerator : MonoBehaviour
 
     private void Start()
     {
-        meshFilter = GetComponent<MeshFilter>();
+        meshFilter   = GetComponent<MeshFilter>();
+        meshRenderer = GetComponent<MeshRenderer>();
         mesh = new Mesh();
         timer = 0;
+
+        InitHeightRange();
+    }
+
+    private void InitHeightRange()
+    {
+        if (meshRenderer == null || densityField == null) return;
+
+        float minHeight = densityField.transform.position.y;
+        float maxHeight = densityField.transform.position.y
+                        + (densityField.Resolution - 1) * densityField.UnitSize;
+
+        meshRenderer.material.SetFloat("_MinHeight", minHeight);
+        meshRenderer.material.SetFloat("_MaxHeight", maxHeight);
     }
 
     private void Update()

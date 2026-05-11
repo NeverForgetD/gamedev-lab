@@ -7,12 +7,26 @@ public struct FieldData
     public float density;
 }
 
+public enum NoiseType { _2D, _3D }
+
+[System.Serializable]
+public struct NoiseSettings
+{
+    public bool      enabled;
+    public NoiseType noiseType;
+    public float     frequency;
+    public float     amplitude;
+    [Range(1, 8)] public int octaves;
+    public float     lacunarity;
+    [Range(0f, 1f)] public float gain;
+}
+
 public class SimpleDensityField : MonoBehaviour
 {
     private static readonly int GizmoBufferProperty = Shader.PropertyToID("_GizmoBuffer");
     private const int STRIDE = 16;
 
-    public enum FieldType { Sphere, Terrain2D, Cave3D }
+    public enum FieldType { Sphere, Terrain2D }
 
     [Header("Field Properties")]
     [SerializeField] private FieldType fieldType = FieldType.Sphere;
@@ -22,23 +36,29 @@ public class SimpleDensityField : MonoBehaviour
 
     [Header("Sphere Properties")]
     [SerializeField] private float sphereRadius = 7.5f;
+    [SerializeField] private NoiseSettings sphereNoise = new NoiseSettings
+    {
+        enabled    = false,
+        noiseType  = NoiseType._3D,
+        frequency  = 0.3f,
+        amplitude  = 1f,
+        octaves    = 4,
+        lacunarity = 2f,
+        gain       = 0.5f
+    };
 
     [Header("Terrain2D Properties")]
-    [SerializeField] private float terrain_baseHeight  = 4f;
-    [SerializeField] private float terrain_frequency   = 0.3f;
-    [SerializeField] private float terrain_amplitude   = 2f;
-    private int   terrain_octaves   = 4;
-    private float terrain_lacunarity = 2f;
-    private float terrain_gain       = 0.5f;
-
-    [Header("Cave3D Properties")]
-    [SerializeField] private float cave_groundLevel  = 4f;
-    [SerializeField] private float cave_threshold    = 0.3f;
-    [SerializeField] private float cave_frequency    = 0.4f;
-    [SerializeField] private float cave_amplitude    = 1f;
-    private int   cave_octaves    = 4;
-    private float cave_lacunarity = 2f;
-    private float cave_gain       = 0.5f;
+    [SerializeField] private float terrain_baseHeight = 4f;
+    [SerializeField] private NoiseSettings terrainNoise = new NoiseSettings
+    {
+        enabled    = true,
+        noiseType  = NoiseType._2D,
+        frequency  = 0.3f,
+        amplitude  = 2f,
+        octaves    = 4,
+        lacunarity = 2f,
+        gain       = 0.5f
+    };
 
     [Header("Gizmos Settings")]
     [SerializeField] private Mesh gizmoMesh;
@@ -89,9 +109,8 @@ public class SimpleDensityField : MonoBehaviour
     {
         switch (fieldType)
         {
-            case FieldType.Sphere:    CreateSphere(transform.position);   break;
+            case FieldType.Sphere:    CreateSphere(transform.position);    break;
             case FieldType.Terrain2D: CreateTerrain2D(transform.position); break;
-            case FieldType.Cave3D:    CreateCave3D(transform.position);    break;
         }
     }
 
@@ -99,7 +118,6 @@ public class SimpleDensityField : MonoBehaviour
     {
         FieldType.Sphere    => new float3(1, 1, 1) * (resolution - 1) / 2f,
         FieldType.Terrain2D => new float3((resolution - 1) / 2f, 0f, (resolution - 1) / 2f),
-        FieldType.Cave3D    => new float3(1, 1, 1) * (resolution - 1) / 2f,
         _                   => new float3(1, 1, 1) * (resolution - 1) / 2f
     };
 
@@ -116,11 +134,10 @@ public class SimpleDensityField : MonoBehaviour
             var z = i / (resolution * resolution);
             var pos = (new float3(x, y, z) - center) * unitSize + centerPos;
 
-            DensityField[i] = new FieldData
-            {
-                position = pos,
-                density  = math.distance(pos, centerPos) - sphereRadius
-            };
+            float density = math.distance(pos, centerPos) - sphereRadius;
+            density = ApplyNoise(density, pos, sphereNoise, noiseSign: 1f);
+
+            DensityField[i] = new FieldData { position = pos, density = density };
         }
     }
 
@@ -135,66 +152,47 @@ public class SimpleDensityField : MonoBehaviour
             var z = i / (resolution * resolution);
             var pos = (new float3(x, y, z) - center) * unitSize + originPos;
 
-            var surfaceHeight = terrain_baseHeight
-                              + FBm2D(new float2(pos.x, pos.z)) * terrain_amplitude;
+            float density = pos.y - terrain_baseHeight;
+            density = ApplyNoise(density, pos, terrainNoise, noiseSign: -1f);
 
-            densityField[i] = new FieldData
-            {
-                position = pos,
-                density  = pos.y - surfaceHeight
-            };
+            densityField[i] = new FieldData { position = pos, density = density };
         }
     }
 
-    // ── Cave3D ────────────────────────────────────────────────
-    private void CreateCave3D(float3 originPos)
+    // ── Noise ─────────────────────────────────────────────────
+    private float ApplyNoise(float density, float3 pos, NoiseSettings ns, float noiseSign = 1f)
     {
-        var center = GetCenter();
-        for (var i = 0; i < densityField.Length; i++)
-        {
-            var x = i % resolution;
-            var y = (i / resolution) % resolution;
-            var z = i / (resolution * resolution);
-            var pos = (new float3(x, y, z) - center) * unitSize + originPos;
+        if (!ns.enabled) return density;
 
-            // 지표면 SDF: 위=공기(양수), 아래=고체(음수)
-            float ground = pos.y - cave_groundLevel;
+        float fbm = ns.noiseType == NoiseType._2D
+            ? FBm(new float2(pos.x, pos.z), ns)
+            : FBm(pos, ns);
 
-            // 터널 조각: 노이즈가 0에 가까운 면을 따라 터널 생성
-            float tunnel = cave_threshold - math.abs(FBm3D(pos) * cave_amplitude);
-
-            // 둘 중 하나라도 양수(공기)면 공기, 둘 다 음수일 때만 고체
-            densityField[i] = new FieldData
-            {
-                position = pos,
-                density  = math.max(ground, tunnel)
-            };
-        }
+        return density + noiseSign * fbm * ns.amplitude;
     }
 
-    // ── fBm ───────────────────────────────────────────────────
-    private float FBm2D(float2 p)
+    private float FBm(float2 p, NoiseSettings ns)
     {
-        float value = 0f, amp = 1f, freq = terrain_frequency, norm = 0f;
-        for (int i = 0; i < terrain_octaves; i++)
+        float value = 0f, amp = 1f, freq = ns.frequency, norm = 0f;
+        for (int i = 0; i < ns.octaves; i++)
         {
             value += noise.snoise(p * freq) * amp;
             norm  += amp;
-            freq  *= terrain_lacunarity;
-            amp   *= terrain_gain;
+            freq  *= ns.lacunarity;
+            amp   *= ns.gain;
         }
         return value / norm;
     }
 
-    private float FBm3D(float3 p)
+    private float FBm(float3 p, NoiseSettings ns)
     {
-        float value = 0f, amp = 1f, freq = cave_frequency, norm = 0f;
-        for (int i = 0; i < cave_octaves; i++)
+        float value = 0f, amp = 1f, freq = ns.frequency, norm = 0f;
+        for (int i = 0; i < ns.octaves; i++)
         {
             value += noise.snoise(p * freq) * amp;
             norm  += amp;
-            freq  *= cave_lacunarity;
-            amp   *= cave_gain;
+            freq  *= ns.lacunarity;
+            amp   *= ns.gain;
         }
         return value / norm;
     }
