@@ -7,18 +7,12 @@ public struct FieldData
     public float density;
 }
 
-public enum NoiseType { _2D, _3D }
-
 [System.Serializable]
 public struct NoiseSettings
 {
-    public bool      enabled;
-    public NoiseType noiseType;
-    public float     frequency;
-    public float     amplitude;
-    [Range(1, 8)] public int octaves;
-    public float     lacunarity;
-    [Range(0f, 1f)] public float gain;
+    public bool  applyNoise;
+    public float frequency;
+    public float amplitude;
 }
 
 public class SimpleDensityField : MonoBehaviour
@@ -26,55 +20,52 @@ public class SimpleDensityField : MonoBehaviour
     private static readonly int GizmoBufferProperty = Shader.PropertyToID("_GizmoBuffer");
     private const int STRIDE = 16;
 
+    // fBm 고정 수치
+    private const int   NOISE_OCTAVES    = 4;
+    private const float NOISE_LACUNARITY = 2f;
+    private const float NOISE_GAIN       = 0.5f;
+
     public enum FieldType { Sphere, Terrain2D }
 
     [Header("Field Properties")]
-    [SerializeField] private FieldType fieldType = FieldType.Sphere;
-    [SerializeField] private int resolution = 16;
-    [SerializeField] private float unitSize = 1f;
-    [SerializeField] private float refreshRate = 0.3f;
+    [SerializeField] private FieldType fieldType   = FieldType.Sphere;
+    [SerializeField] private int       resolution  = 16;
+    [SerializeField] private float     unitSize    = 1f;
+    [SerializeField] private float     refreshRate = 0.3f;
 
     [Header("Sphere Properties")]
-    [SerializeField] private float sphereRadius = 7.5f;
+    [SerializeField] private float        sphereRadius = 7.5f;
     [SerializeField] private NoiseSettings sphereNoise = new NoiseSettings
     {
-        enabled    = false,
-        noiseType  = NoiseType._3D,
+        applyNoise = false,
         frequency  = 0.3f,
         amplitude  = 1f,
-        octaves    = 4,
-        lacunarity = 2f,
-        gain       = 0.5f
     };
 
     [Header("Terrain2D Properties")]
-    [SerializeField] private float terrain_baseHeight = 4f;
-    [SerializeField] private NoiseSettings terrainNoise = new NoiseSettings
+    [SerializeField] private float         terrain_baseHeight = 4f;
+    [SerializeField] private NoiseSettings terrainNoise       = new NoiseSettings
     {
-        enabled    = true,
-        noiseType  = NoiseType._2D,
+        applyNoise = true,
         frequency  = 0.3f,
         amplitude  = 2f,
-        octaves    = 4,
-        lacunarity = 2f,
-        gain       = 0.5f
     };
 
     [Header("Gizmos Settings")]
-    [SerializeField] private Mesh gizmoMesh;
+    [SerializeField] private Mesh     gizmoMesh;
     [SerializeField] private Material gizmoMaterial;
-    [SerializeField] private bool showGizmos = true;
+    [SerializeField] private bool     showGizmos = true;
 
-    private Bounds bounds;
+    private Bounds        bounds;
     private ComputeBuffer gizmoBuffer;
     private ComputeBuffer argsBuffer;
 
     private FieldData[] densityField;
-    private float timer;
+    private float       timer;
 
     public FieldData[] DensityField => densityField;
-    public int Resolution => resolution;
-    public float UnitSize => unitSize;
+    public int         Resolution   => resolution;
+    public float       UnitSize     => unitSize;
 
     void Start()
     {
@@ -121,7 +112,7 @@ public class SimpleDensityField : MonoBehaviour
         _                   => new float3(1, 1, 1) * (resolution - 1) / 2f
     };
 
-    // ── Sphere ────────────────────────────────────────────────
+    // ── Sphere (노이즈: 3D) ───────────────────────────────────────
     private void CreateSphere(float3 centerPos)
     {
         if (DensityField == null || DensityField.Length == 0) InitField();
@@ -129,75 +120,66 @@ public class SimpleDensityField : MonoBehaviour
         var center = GetCenter();
         for (var i = 0; i < DensityField.Length; i++)
         {
-            var x = i % resolution;
-            var y = (i / resolution) % resolution;
-            var z = i / (resolution * resolution);
+            var x   = i % resolution;
+            var y   = (i / resolution) % resolution;
+            var z   = i / (resolution * resolution);
             var pos = (new float3(x, y, z) - center) * unitSize + centerPos;
 
             float density = math.distance(pos, centerPos) - sphereRadius;
-            density = ApplyNoise(density, pos, sphereNoise, noiseSign: 1f);
+            if (sphereNoise.applyNoise)
+                density += FBm3D(pos, sphereNoise.frequency) * sphereNoise.amplitude;
 
             DensityField[i] = new FieldData { position = pos, density = density };
         }
     }
 
-    // ── Terrain2D ─────────────────────────────────────────────
+    // ── Terrain2D (노이즈: 2D xz) ─────────────────────────────────
     private void CreateTerrain2D(float3 originPos)
     {
         var center = GetCenter();
         for (var i = 0; i < densityField.Length; i++)
         {
-            var x = i % resolution;
-            var y = (i / resolution) % resolution;
-            var z = i / (resolution * resolution);
+            var x   = i % resolution;
+            var y   = (i / resolution) % resolution;
+            var z   = i / (resolution * resolution);
             var pos = (new float3(x, y, z) - center) * unitSize + originPos;
 
             float density = pos.y - terrain_baseHeight;
-            density = ApplyNoise(density, pos, terrainNoise, noiseSign: -1f);
+            if (terrainNoise.applyNoise)
+                density -= FBm2D(new float2(pos.x, pos.z), terrainNoise.frequency) * terrainNoise.amplitude;
 
             densityField[i] = new FieldData { position = pos, density = density };
         }
     }
 
-    // ── Noise ─────────────────────────────────────────────────
-    private float ApplyNoise(float density, float3 pos, NoiseSettings ns, float noiseSign = 1f)
+    // ── fBm ──────────────────────────────────────────────────────
+    private float FBm2D(float2 p, float frequency)
     {
-        if (!ns.enabled) return density;
-
-        float fbm = ns.noiseType == NoiseType._2D
-            ? FBm(new float2(pos.x, pos.z), ns)
-            : FBm(pos, ns);
-
-        return density + noiseSign * fbm * ns.amplitude;
-    }
-
-    private float FBm(float2 p, NoiseSettings ns)
-    {
-        float value = 0f, amp = 1f, freq = ns.frequency, norm = 0f;
-        for (int i = 0; i < ns.octaves; i++)
+        float value = 0f, amp = 1f, freq = frequency, norm = 0f;
+        for (int i = 0; i < NOISE_OCTAVES; i++)
         {
             value += noise.snoise(p * freq) * amp;
             norm  += amp;
-            freq  *= ns.lacunarity;
-            amp   *= ns.gain;
+            freq  *= NOISE_LACUNARITY;
+            amp   *= NOISE_GAIN;
         }
         return value / norm;
     }
 
-    private float FBm(float3 p, NoiseSettings ns)
+    private float FBm3D(float3 p, float frequency)
     {
-        float value = 0f, amp = 1f, freq = ns.frequency, norm = 0f;
-        for (int i = 0; i < ns.octaves; i++)
+        float value = 0f, amp = 1f, freq = frequency, norm = 0f;
+        for (int i = 0; i < NOISE_OCTAVES; i++)
         {
             value += noise.snoise(p * freq) * amp;
             norm  += amp;
-            freq  *= ns.lacunarity;
-            amp   *= ns.gain;
+            freq  *= NOISE_LACUNARITY;
+            amp   *= NOISE_GAIN;
         }
         return value / norm;
     }
 
-    // ── Gizmo ─────────────────────────────────────────────────
+    // ── Gizmo ─────────────────────────────────────────────────────
     private void InitGizmo()
     {
         if (gizmoMaterial == null || gizmoMesh == null) return;

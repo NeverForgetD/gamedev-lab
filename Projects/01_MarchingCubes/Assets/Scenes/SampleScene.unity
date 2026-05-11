@@ -1081,22 +1081,14 @@ MonoBehaviour:
   refreshRate: 0.5
   sphereRadius: 10
   sphereNoise:
-    enabled: 0
-    noiseType: 1
+    applyNoise: 0
     frequency: 0.05
     amplitude: 5
-    octaves: 4
-    lacunarity: 2
-    gain: 0.5
   terrain_baseHeight: 16
   terrainNoise:
-    enabled: 1
-    noiseType: 0
+    applyNoise: 1
     frequency: 0.04
     amplitude: 10
-    octaves: 4
-    lacunarity: 2
-    gain: 0.5
   gizmoMesh: {fileID: 10207, guid: 0000000000000000e000000000000000, type: 0}
   gizmoMaterial: {fileID: 2100000, guid: e6957d0929cb4984b9e81c230b5d556c, type: 2}
   showGizmos: 0
