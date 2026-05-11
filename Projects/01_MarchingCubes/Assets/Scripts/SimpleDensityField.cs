@@ -28,10 +28,9 @@ public class SimpleDensityField : MonoBehaviour
     public enum FieldType { Sphere, Terrain2D }
 
     [Header("Field Properties")]
-    [SerializeField] private FieldType fieldType   = FieldType.Sphere;
-    [SerializeField] private int       resolution  = 16;
-    [SerializeField] private float     unitSize    = 1f;
-    [SerializeField] private float     refreshRate = 0.3f;
+    [SerializeField] private FieldType fieldType  = FieldType.Sphere;
+    [SerializeField] private int       resolution = 16;
+    [SerializeField] private float     unitSize   = 1f;
 
     [Header("Sphere Properties")]
     [SerializeField] private float        sphereRadius = 5f;
@@ -61,7 +60,9 @@ public class SimpleDensityField : MonoBehaviour
     private ComputeBuffer argsBuffer;
 
     private FieldData[] densityField;
-    private float       timer;
+    private float[]     deltaField;       // 편집 누적값 (RefreshField에서 리셋 안 됨)
+
+    public bool IsDirty { get; private set; }
 
     public FieldData[] DensityField => densityField;
     public int         Resolution   => resolution;
@@ -75,17 +76,7 @@ public class SimpleDensityField : MonoBehaviour
 
     private void Update()
     {
-        if (gizmoBuffer == null || gizmoMaterial == null) return;
-
-        timer += Time.deltaTime;
-        if (timer > refreshRate)
-        {
-            RefreshField();
-            gizmoBuffer.SetData(densityField);
-            timer = 0;
-        }
-
-        if (showGizmos)
+        if (showGizmos && gizmoBuffer != null && gizmoMaterial != null)
             Graphics.DrawMeshInstancedIndirect(gizmoMesh, 0, gizmoMaterial, bounds, argsBuffer);
     }
 
@@ -93,8 +84,12 @@ public class SimpleDensityField : MonoBehaviour
     {
         int count = resolution * resolution * resolution;
         densityField = new FieldData[count];
+        deltaField   = new float[count];
         RefreshField();
+        IsDirty = true;   // 최초 생성 후 메시 생성 트리거
     }
+
+    public void ClearDirty() => IsDirty = false;
 
     private void RefreshField()
     {
@@ -129,7 +124,7 @@ public class SimpleDensityField : MonoBehaviour
             if (sphereNoise.applyNoise)
                 density += FBm3D(pos, sphereNoise.frequency) * sphereNoise.amplitude;
 
-            DensityField[i] = new FieldData { position = pos, density = density };
+            DensityField[i] = new FieldData { position = pos, density = density + deltaField[i] };
         }
     }
 
@@ -148,7 +143,7 @@ public class SimpleDensityField : MonoBehaviour
             if (terrainNoise.applyNoise)
                 density -= FBm2D(new float2(pos.x, pos.z), terrainNoise.frequency) * terrainNoise.amplitude;
 
-            densityField[i] = new FieldData { position = pos, density = density };
+            densityField[i] = new FieldData { position = pos, density = density + deltaField[i] };
         }
     }
 
@@ -179,6 +174,27 @@ public class SimpleDensityField : MonoBehaviour
         return value / norm;
     }
 
+    // ── Terrain Edit ──────────────────────────────────────────────
+    // delta > 0 : 파내기 (density 올림 → 공기)
+    // delta < 0 : 채우기 (density 내림 → 땅)
+    public void ModifyDensity(float3 center, float radius, float delta)
+    {
+        float radiusSq = radius * radius;
+
+        for (int i = 0; i < densityField.Length; i++)
+        {
+            float distSq = math.distancesq(densityField[i].position, center);
+            if (distSq >= radiusSq) continue;
+
+            float t = 1f - math.sqrt(distSq) / radius;   // 1=중앙, 0=경계
+            deltaField[i] += delta * t * t;               // falloff 적용 후 누적
+        }
+
+        RefreshField();                                           // 절차적 + delta 즉시 합산
+        if (gizmoBuffer != null) gizmoBuffer.SetData(densityField); // 기즈모도 즉시 갱신
+        IsDirty = true;                                           // Generator에 메시 재생성 신호
+    }
+
     // ── Gizmo ─────────────────────────────────────────────────────
     private void InitGizmo()
     {
@@ -192,6 +208,7 @@ public class SimpleDensityField : MonoBehaviour
         gizmoBuffer = new ComputeBuffer(count, STRIDE);
         gizmoBuffer.SetData(densityField);
 
+        gizmoMaterial = new Material(gizmoMaterial);   // 청크마다 독립 인스턴스
         gizmoMaterial.enableInstancing = true;
         gizmoMaterial.SetBuffer(GizmoBufferProperty, gizmoBuffer);
 
@@ -204,13 +221,12 @@ public class SimpleDensityField : MonoBehaviour
         };
         argsBuffer = new ComputeBuffer(1, args.Length * sizeof(uint), ComputeBufferType.IndirectArguments);
         argsBuffer.SetData(args);
-
-        timer = 0;
     }
 
     private void OnDestroy()
     {
         gizmoBuffer?.Dispose();
         argsBuffer?.Dispose();
+        if (gizmoMaterial != null) Destroy(gizmoMaterial);
     }
 }

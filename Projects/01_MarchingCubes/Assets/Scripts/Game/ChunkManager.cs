@@ -4,16 +4,17 @@ using UnityEngine;
 public class ChunkManager : MonoBehaviour
 {
     [SerializeField] private Transform   player;
-    [SerializeField] private GameObject  chunkPrefab;    // SimpleDensityField + SimpleMarchingCubeGenerator
-    [SerializeField] private int         renderDistance = 1;   // 플레이어 기준 ±N 청크
-    [SerializeField] private int         chunksPerFrame = 2;   // 프레임당 생성 개수
+    [SerializeField] private GameObject  chunkPrefab;
+    [SerializeField] private int         renderDistance     = 3;
+    [SerializeField] private int         backRenderDistance = 1;
+    [SerializeField] private int         chunksPerFrame     = 2;
 
-    private float chunkWorldSize;   // (resolution - 1) * unitSize
+    private float chunkWorldSize;
 
-    private Vector2Int                    lastPlayerChunk = new(int.MaxValue, int.MaxValue);
-    private Dictionary<Vector2Int, GameObject> activeChunks = new();
-    private Queue<Vector2Int>             generateQueue    = new();
-    private HashSet<Vector2Int>           queued           = new();   // Contains O(1)
+    private Vector2Int                        lastPlayerChunk = new(int.MaxValue, int.MaxValue);
+    private Dictionary<Vector2Int, GameObject> activeChunks   = new();
+    private Queue<Vector2Int>                  generateQueue  = new();
+    private HashSet<Vector2Int>                queued         = new();
 
     void Start()
     {
@@ -33,29 +34,42 @@ public class ChunkManager : MonoBehaviour
             UpdateChunks(playerChunk);
         }
 
-        // 큐에서 프레임당 N개씩 생성
         int spawned = 0;
         while (spawned < chunksPerFrame && generateQueue.Count > 0)
         {
             var coord = generateQueue.Dequeue();
             queued.Remove(coord);
-
             if (!activeChunks.ContainsKey(coord))
                 SpawnChunk(coord);
-
             spawned++;
         }
     }
 
     private void UpdateChunks(Vector2Int center)
     {
-        // 필요한 청크 집합
-        var needed = new HashSet<Vector2Int>();
-        for (int x = -renderDistance; x <= renderDistance; x++)
-        for (int z = -renderDistance; z <= renderDistance; z++)
-            needed.Add(new Vector2Int(center.x + x, center.y + z));
+        Vector3 fwd   = player.forward;
+        var     fwd2D = new Vector2(fwd.x, fwd.z).normalized;
 
-        // 범위 밖 청크 제거
+        var needed = new HashSet<Vector2Int>();
+        int range  = Mathf.Max(renderDistance, backRenderDistance);
+
+        for (int x = -range; x <= range; x++)
+        for (int z = -range; z <= range; z++)
+        {
+            var coord = new Vector2Int(center.x + x, center.y + z);
+            var dir2D = new Vector2(x, z);
+            int dist  = Mathf.RoundToInt(dir2D.magnitude);
+
+            if (dist == 0) { needed.Add(coord); continue; }
+
+            float dot   = Vector2.Dot(dir2D.normalized, fwd2D);
+            bool  front = dot >= -0.2f;
+            int   limit = front ? renderDistance : backRenderDistance;
+
+            if (dist <= limit)
+                needed.Add(coord);
+        }
+
         var toRemove = new List<Vector2Int>();
         foreach (var coord in activeChunks.Keys)
             if (!needed.Contains(coord)) toRemove.Add(coord);
@@ -66,14 +80,12 @@ public class ChunkManager : MonoBehaviour
             activeChunks.Remove(coord);
         }
 
-        // 없는 청크 수집 후 거리순 정렬 → 가까운 것부터 큐에 추가
         var toQueue = new List<Vector2Int>();
         foreach (var coord in needed)
             if (!activeChunks.ContainsKey(coord) && !queued.Contains(coord))
                 toQueue.Add(coord);
 
-        toQueue.Sort((a, b) =>
-            SqrDist(a, center).CompareTo(SqrDist(b, center)));
+        toQueue.Sort((a, b) => SqrDist(a, center).CompareTo(SqrDist(b, center)));
 
         foreach (var coord in toQueue)
         {
@@ -90,13 +102,32 @@ public class ChunkManager : MonoBehaviour
         activeChunks[coord] = chunk;
     }
 
-    private Vector2Int WorldToChunk(Vector3 pos)
+    public List<SimpleDensityField> GetChunksInRadius(Vector3 worldPos, float radius)
     {
-        return new Vector2Int(
-            Mathf.FloorToInt(pos.x / chunkWorldSize),
-            Mathf.FloorToInt(pos.z / chunkWorldSize)
-        );
+        var   result   = new List<SimpleDensityField>();
+        float halfSize = chunkWorldSize * 0.5f;
+
+        foreach (var kvp in activeChunks)
+        {
+            var sdf = kvp.Value.GetComponent<SimpleDensityField>();
+            if (sdf == null) continue;
+
+            Vector3 center = kvp.Value.transform.position;
+            float   cx     = Mathf.Clamp(worldPos.x, center.x - halfSize, center.x + halfSize);
+            float   cz     = Mathf.Clamp(worldPos.z, center.z - halfSize, center.z + halfSize);
+            float   dx     = worldPos.x - cx;
+            float   dz     = worldPos.z - cz;
+
+            if (dx * dx + dz * dz <= radius * radius)
+                result.Add(sdf);
+        }
+        return result;
     }
+
+    private Vector2Int WorldToChunk(Vector3 pos) => new(
+        Mathf.FloorToInt(pos.x / chunkWorldSize),
+        Mathf.FloorToInt(pos.z / chunkWorldSize)
+    );
 
     private static int SqrDist(Vector2Int a, Vector2Int b)
     {
