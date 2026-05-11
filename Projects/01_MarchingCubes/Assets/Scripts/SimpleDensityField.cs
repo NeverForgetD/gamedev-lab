@@ -34,21 +34,21 @@ public class SimpleDensityField : MonoBehaviour
     [SerializeField] private float     refreshRate = 0.3f;
 
     [Header("Sphere Properties")]
-    [SerializeField] private float        sphereRadius = 7.5f;
+    [SerializeField] private float        sphereRadius = 5f;
     [SerializeField] private NoiseSettings sphereNoise = new NoiseSettings
     {
         applyNoise = false,
-        frequency  = 0.3f,
-        amplitude  = 1f,
+        frequency  = 0.05f,
+        amplitude  = 2f,
     };
 
     [Header("Terrain2D Properties")]
-    [SerializeField] private float         terrain_baseHeight = 4f;
+    [SerializeField] private float         terrain_baseHeight = 5f;
     [SerializeField] private NoiseSettings terrainNoise       = new NoiseSettings
     {
         applyNoise = true,
-        frequency  = 0.3f,
-        amplitude  = 2f,
+        frequency  = 0.05f,
+        amplitude  = 5f,
     };
 
     [Header("Gizmos Settings")]

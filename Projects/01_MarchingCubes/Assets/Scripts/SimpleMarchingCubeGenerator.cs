@@ -34,7 +34,7 @@ public class SimpleMarchingCubeGenerator : MonoBehaviour
         mesh = new Mesh();
         timer = 0;
 
-        InitHeightRange();
+        //InitHeightRange();
     }
 
     private void InitHeightRange()
@@ -67,7 +67,8 @@ public class SimpleMarchingCubeGenerator : MonoBehaviour
     private void GenerateMesh()
     {
         var fieldBuffer = densityField.DensityField;
-        var resolution = densityField.Resolution;
+        var resolution  = densityField.Resolution;
+        var origin      = (Unity.Mathematics.float3)transform.position; // 월드→로컬 변환용
 
         vertices.Clear();
         triangleIndices.Clear();
@@ -79,9 +80,9 @@ public class SimpleMarchingCubeGenerator : MonoBehaviour
             foreach (var triangle in MarchCube(new int3(x, y, z), resolution, fieldBuffer))
             {
                 var i = vertices.Count;
-                vertices.Add(triangle.a);
-                vertices.Add(triangle.b);
-                vertices.Add(triangle.c);
+                vertices.Add((Vector3)(triangle.a - origin));
+                vertices.Add((Vector3)(triangle.b - origin));
+                vertices.Add((Vector3)(triangle.c - origin));
                 triangleIndices.Add(i);
                 triangleIndices.Add(i + 1);
                 triangleIndices.Add(i + 2);
