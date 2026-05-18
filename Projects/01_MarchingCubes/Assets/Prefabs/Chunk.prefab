@@ -48,19 +48,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: c78354a43fc52b542bb9f08b3a8b24a2, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::SimpleDensityField
-  fieldType: 1
-  resolution: 16
-  unitSize: 1
-  sphereRadius: 5
-  sphereNoise:
-    applyNoise: 0
-    frequency: 0.05
-    amplitude: 2
-  terrain_baseHeight: 5
-  terrainNoise:
-    applyNoise: 1
-    frequency: 0.05
-    amplitude: 5
+  profile: {fileID: 11400000, guid: 7d5e35e78bf11044db847fa0e0596669, type: 2}
   gizmoMesh: {fileID: 10207, guid: 0000000000000000e000000000000000, type: 0}
   gizmoMaterial: {fileID: 2100000, guid: e6957d0929cb4984b9e81c230b5d556c, type: 2}
   showGizmos: 0

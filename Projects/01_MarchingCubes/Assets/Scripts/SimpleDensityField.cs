@@ -21,35 +21,13 @@ public class SimpleDensityField : MonoBehaviour
     private static readonly int GizmoBufferProperty = Shader.PropertyToID("_GizmoBuffer");
     private const int STRIDE = 16;
 
-    // fBm 고정 수치
     private const int   NOISE_OCTAVES    = 4;
     private const float NOISE_LACUNARITY = 2f;
     private const float NOISE_GAIN       = 0.5f;
 
     public enum FieldType { Sphere, Terrain2D }
 
-    [Header("Field Properties")]
-    [SerializeField] private FieldType fieldType  = FieldType.Sphere;
-    [SerializeField] private int       resolution = 16;
-    [SerializeField] private float     unitSize   = 1f;
-
-    [Header("Sphere Properties")]
-    [SerializeField] private float        sphereRadius = 5f;
-    [SerializeField] private NoiseSettings sphereNoise = new NoiseSettings
-    {
-        applyNoise = false,
-        frequency  = 0.05f,
-        amplitude  = 2f,
-    };
-
-    [Header("Terrain2D Properties")]
-    [SerializeField] private float         terrain_baseHeight = 5f;
-    [SerializeField] private NoiseSettings terrainNoise       = new NoiseSettings
-    {
-        applyNoise = true,
-        frequency  = 0.05f,
-        amplitude  = 5f,
-    };
+    [SerializeField] private ChunkProfile profile;
 
     [Header("Gizmos Settings")]
     [SerializeField] private Mesh     gizmoMesh;
@@ -61,14 +39,20 @@ public class SimpleDensityField : MonoBehaviour
     private ComputeBuffer argsBuffer;
 
     private FieldData[] densityField;
-    private float[]     deltaField;       // 편집 누적값 (RefreshField에서 리셋 안 됨)
+    private float[]     deltaField;
 
     public bool IsDirty { get; private set; }
 
+    public ChunkProfile Profile
+    {
+        get => profile;
+        set => profile = value;
+    }
+
     public FieldData[] DensityField => densityField;
-    public int         Resolution   => resolution;
-    public float       UnitSize     => unitSize;
-    public float       WorldSize    => (resolution - 1) * unitSize;
+    public int         Resolution   => profile.resolution;
+    public float       UnitSize     => profile.unitSize;
+    public float       WorldSize    => profile.WorldSize;
 
     void Start()
     {
@@ -84,21 +68,16 @@ public class SimpleDensityField : MonoBehaviour
 
     public void InitField()
     {
-        int count = resolution * resolution * resolution;
+        if (profile == null) { Debug.LogError("ChunkProfile not assigned", this); return; }
+
+        int count = profile.resolution * profile.resolution * profile.resolution;
         densityField = new FieldData[count];
         deltaField   = new float[count];
         RefreshField();
-        IsDirty = true;   // 최초 생성 후 메시 생성 트리거
+        IsDirty = true;
     }
 
     public void ClearDirty() => IsDirty = false;
-
-    public void SetResolution(int newResolution)
-    {
-        resolution = newResolution;
-        deltaField = null;
-        InitField();
-    }
 
     public void ResetField()
     {
@@ -109,38 +88,36 @@ public class SimpleDensityField : MonoBehaviour
 
     private void RefreshField()
     {
-        switch (fieldType)
+        switch (profile.fieldType)
         {
             case FieldType.Sphere:    CreateSphere(transform.position);    break;
             case FieldType.Terrain2D: CreateTerrain2D(transform.position); break;
         }
     }
 
-    private float3 GetCenter() => fieldType switch
+    private float3 GetCenter() => profile.fieldType switch
     {
-        FieldType.Sphere    => new float3(1, 1, 1) * (resolution - 1) / 2f,
-        FieldType.Terrain2D => new float3((resolution - 1) / 2f, 0f, (resolution - 1) / 2f),
-        _                   => new float3(1, 1, 1) * (resolution - 1) / 2f
+        FieldType.Sphere    => new float3(1, 1, 1) * (profile.resolution - 1) / 2f,
+        FieldType.Terrain2D => new float3((profile.resolution - 1) / 2f, 0f, (profile.resolution - 1) / 2f),
+        _                   => new float3(1, 1, 1) * (profile.resolution - 1) / 2f
     };
 
     // ── Sphere (노이즈: 3D) ───────────────────────────────────────
     private void CreateSphere(float3 centerPos)
     {
-        if (DensityField == null || DensityField.Length == 0) InitField();
-
         var center = GetCenter();
-        for (var i = 0; i < DensityField.Length; i++)
+        for (var i = 0; i < densityField.Length; i++)
         {
-            var x   = i % resolution;
-            var y   = (i / resolution) % resolution;
-            var z   = i / (resolution * resolution);
-            var pos = (new float3(x, y, z) - center) * unitSize + centerPos;
+            var x   = i % profile.resolution;
+            var y   = (i / profile.resolution) % profile.resolution;
+            var z   = i / (profile.resolution * profile.resolution);
+            var pos = (new float3(x, y, z) - center) * profile.unitSize + centerPos;
 
-            float density = math.distance(pos, centerPos) - sphereRadius;
-            if (sphereNoise.applyNoise)
-                density += FBm3D(pos, sphereNoise.frequency) * sphereNoise.amplitude;
+            float density = math.distance(pos, centerPos) - profile.sphereRadius;
+            if (profile.sphereNoise.applyNoise)
+                density += FBm3D(pos, profile.sphereNoise.frequency) * profile.sphereNoise.amplitude;
 
-            DensityField[i] = new FieldData { position = pos, density = density + deltaField[i] };
+            densityField[i] = new FieldData { position = pos, density = density + deltaField[i] };
         }
     }
 
@@ -150,14 +127,14 @@ public class SimpleDensityField : MonoBehaviour
         var center = GetCenter();
         for (var i = 0; i < densityField.Length; i++)
         {
-            var x   = i % resolution;
-            var y   = (i / resolution) % resolution;
-            var z   = i / (resolution * resolution);
-            var pos = (new float3(x, y, z) - center) * unitSize + originPos;
+            var x   = i % profile.resolution;
+            var y   = (i / profile.resolution) % profile.resolution;
+            var z   = i / (profile.resolution * profile.resolution);
+            var pos = (new float3(x, y, z) - center) * profile.unitSize + originPos;
 
-            float density = pos.y - terrain_baseHeight;
-            if (terrainNoise.applyNoise)
-                density -= FBm2D(new float2(pos.x, pos.z), terrainNoise.frequency) * terrainNoise.amplitude;
+            float density = pos.y - profile.terrain_baseHeight;
+            if (profile.terrainNoise.applyNoise)
+                density -= FBm2D(new float2(pos.x, pos.z), profile.terrainNoise.frequency) * profile.terrainNoise.amplitude;
 
             densityField[i] = new FieldData { position = pos, density = density + deltaField[i] };
         }
@@ -202,13 +179,13 @@ public class SimpleDensityField : MonoBehaviour
             float distSq = math.distancesq(densityField[i].position, center);
             if (distSq >= radiusSq) continue;
 
-            float t = 1f - math.sqrt(distSq) / radius;   // 1=중앙, 0=경계
-            deltaField[i] += delta * t * t;               // falloff 적용 후 누적
+            float t = 1f - math.sqrt(distSq) / radius;
+            deltaField[i] += delta * t * t;
         }
 
-        RefreshField();                                           // 절차적 + delta 즉시 합산
-        if (gizmoBuffer != null) gizmoBuffer.SetData(densityField); // 기즈모도 즉시 갱신
-        IsDirty = true;                                           // Generator에 메시 재생성 신호
+        RefreshField();
+        if (gizmoBuffer != null) gizmoBuffer.SetData(densityField);
+        IsDirty = true;
     }
 
     // ── Gizmo ─────────────────────────────────────────────────────
@@ -216,15 +193,14 @@ public class SimpleDensityField : MonoBehaviour
     {
         if (gizmoMaterial == null || gizmoMesh == null) return;
 
-        int count = resolution * resolution * resolution;
-
-        float size = resolution * unitSize;
+        int   count = profile.resolution * profile.resolution * profile.resolution;
+        float size  = profile.resolution * profile.unitSize;
         bounds = new Bounds(transform.position, new Vector3(size, size, size));
 
         gizmoBuffer = new ComputeBuffer(count, STRIDE);
         gizmoBuffer.SetData(densityField);
 
-        gizmoMaterial = new Material(gizmoMaterial);   // 청크마다 독립 인스턴스
+        gizmoMaterial = new Material(gizmoMaterial);
         gizmoMaterial.enableInstancing = true;
         gizmoMaterial.SetBuffer(GizmoBufferProperty, gizmoBuffer);
 

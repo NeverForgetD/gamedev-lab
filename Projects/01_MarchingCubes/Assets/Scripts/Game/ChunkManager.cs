@@ -27,8 +27,7 @@ public class ChunkManager : MonoBehaviour
 
     private void Start()
     {
-        var sampleField = chunkPrefab.GetComponent<SimpleDensityField>();
-        chunkWorldSize = sampleField.WorldSize;
+        chunkWorldSize = chunkPrefab.GetComponent<SimpleDensityField>().WorldSize;
 
         int side     = renderDistance * 2 + 1;
         int poolSize = side * side;

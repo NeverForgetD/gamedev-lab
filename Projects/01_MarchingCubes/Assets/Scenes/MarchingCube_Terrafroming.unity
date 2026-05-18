@@ -640,9 +640,17 @@ PrefabInstance:
       value: 
       objectReference: {fileID: 330585545}
     - target: {fileID: 5925718481885766426, guid: bf21b8622eadf1b46bbca0956ab2ffdf, type: 3}
+      propertyPath: chunkY
+      value: 5
+      objectReference: {fileID: 0}
+    - target: {fileID: 5925718481885766426, guid: bf21b8622eadf1b46bbca0956ab2ffdf, type: 3}
       propertyPath: player
       value: 
       objectReference: {fileID: 420030553}
+    - target: {fileID: 5925718481885766426, guid: bf21b8622eadf1b46bbca0956ab2ffdf, type: 3}
+      propertyPath: profile
+      value: 
+      objectReference: {fileID: 11400000, guid: 7d5e35e78bf11044db847fa0e0596669, type: 2}
     - target: {fileID: 5925718481885766426, guid: bf21b8622eadf1b46bbca0956ab2ffdf, type: 3}
       propertyPath: backRenderDistance
       value: 1
