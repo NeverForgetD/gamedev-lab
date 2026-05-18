@@ -428,11 +428,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::ChunkProfileTest
   chunkPrefab: {fileID: 7076232929667900906, guid: 663939dc93065b24a9ef4717de264e1a, type: 3}
-  profiles:
-  - {fileID: 11400000, guid: 6bc2e1dfa7fff3449992e0d811eb28a8, type: 2}
-  - {fileID: 11400000, guid: 0dc7fe9035289734aac3b53a80c5d280, type: 2}
-  - {fileID: 11400000, guid: 7d5e35e78bf11044db847fa0e0596669, type: 2}
-  - {fileID: 11400000, guid: 0db12fe4853bb6d46ac09e81663b6ebe, type: 2}
+  profile: {fileID: 11400000, guid: 7d5e35e78bf11044db847fa0e0596669, type: 2}
   spacing: 15
 --- !u!1660057539 &9223372036854775807
 SceneRoots:

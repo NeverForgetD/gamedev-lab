@@ -14,7 +14,8 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::ChunkProfile
   terrainConfig: {fileID: 11400000, guid: 9138cb2e2bed7664a93a49b7884fcf39, type: 2}
   fieldType: 1
-  resolution: 4
+  resolution: 16
+  lodStep: 4
   terrain_baseHeight: 5
   terrainNoise:
     applyNoise: 1

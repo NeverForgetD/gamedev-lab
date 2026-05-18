@@ -18,8 +18,8 @@ public class SimpleMarchingCubeGenerator : MonoBehaviour
     private Mesh         mesh;
 
     private int[] cubeCorners = new int[8];
-    private List<Vector3> vertices = new();
-    private List<int> triangleIndices = new();
+    private List<Vector3> vertices        = new();
+    private List<int>     triangleIndices = new();
 
     private (int first, int second)[] edgeList =
     {
@@ -57,7 +57,7 @@ public class SimpleMarchingCubeGenerator : MonoBehaviour
     {
         var fieldBuffer = densityField.DensityField;
         var resolution  = densityField.Resolution;
-        var origin      = (Unity.Mathematics.float3)transform.position; // 월드→로컬 변환용
+        var origin      = (Unity.Mathematics.float3)transform.position;
 
         vertices.Clear();
         triangleIndices.Clear();
@@ -147,28 +147,14 @@ public class SimpleMarchingCubeGenerator : MonoBehaviour
         return p1 + t * (p2 - p1);
     }
 
-    // density 비율로 표면 위치를 선형으로 찾습니다 (표준)
-    private float Linear(float v1, float v2)
-    {
-        return (IsoLevel - v1) / (v2 - v1);
-    }
-
-    // density 무시하고 항상 엣지 중간점 → 각진 느낌
-    private float Half() => 0.5f;
-
-    // linear t 에 smoothstep 커브를 씌워 표면을 더 부드럽게
-    private float Smoothstep(float v1, float v2)
+    private float Linear(float v1, float v2)    => (IsoLevel - v1) / (v2 - v1);
+    private float Half()                         => 0.5f;
+    private float Smoothstep(float v1, float v2) { var t = Linear(v1, v2); return t * t * (3f - 2f * t); }
+    private float Snapping(float v1, float v2, float snap = 0.2f)
     {
         var t = Linear(v1, v2);
-        return t * t * (3f - 2f * t);
-    }
-
-    // density 가 한쪽 끝에 매우 가까우면 코너로 스냅 → 복셀 느낌
-    private float Snapping(float v1, float v2, float snapThreshold = 0.2f)
-    {
-        var t = Linear(v1, v2);
-        if (t < snapThreshold) return 0f;
-        if (t > 1f - snapThreshold) return 1f;
+        if (t < snap) return 0f;
+        if (t > 1f - snap) return 1f;
         return t;
     }
 }

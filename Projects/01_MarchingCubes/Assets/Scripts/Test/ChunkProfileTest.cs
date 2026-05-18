@@ -17,8 +17,7 @@ public class ChunkProfileTest : MonoBehaviour
                 go.name = $"Chunk_Row{row}_Col{col}";
                 go.transform.position = new Vector3(col * spacing, 0f, row * spacing);
 
-                var field = go.GetComponent<SimpleDensityField>();
-                field.Profile = profile;
+                go.GetComponent<SimpleDensityField>().Profile = profile;
             }
         }
     }
