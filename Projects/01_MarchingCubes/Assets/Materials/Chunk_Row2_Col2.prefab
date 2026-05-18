@@ -1,6 +1,6 @@
 %YAML 1.1
 %TAG !u! tag:unity3d.com,2011:
---- !u!1 &7076232929667900906
+--- !u!1 &6672154894511306159
 GameObject:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
@@ -8,41 +8,41 @@ GameObject:
   m_PrefabAsset: {fileID: 0}
   serializedVersion: 6
   m_Component:
-  - component: {fileID: 7133693391697568951}
-  - component: {fileID: 8701791712679606834}
-  - component: {fileID: 8832882286226696861}
-  - component: {fileID: -5568167845808975363}
-  - component: {fileID: 606376169296131774}
-  - component: {fileID: -5836973978567368976}
+  - component: {fileID: 1736771446396148499}
+  - component: {fileID: 2337694947619419911}
+  - component: {fileID: 1785549713064623944}
+  - component: {fileID: 5878650048686719144}
+  - component: {fileID: 201887917816741587}
+  - component: {fileID: 2435745110987640468}
   m_Layer: 6
-  m_Name: Chunk
+  m_Name: Chunk_Row2_Col2
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
   m_IsActive: 1
---- !u!4 &7133693391697568951
+--- !u!4 &1736771446396148499
 Transform:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 7076232929667900906}
+  m_GameObject: {fileID: 6672154894511306159}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalPosition: {x: 30, y: 0, z: 30}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
---- !u!114 &8701791712679606834
+--- !u!114 &2337694947619419911
 MonoBehaviour:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 7076232929667900906}
+  m_GameObject: {fileID: 6672154894511306159}
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: c78354a43fc52b542bb9f08b3a8b24a2, type: 3}
@@ -52,36 +52,36 @@ MonoBehaviour:
   gizmoMesh: {fileID: 10207, guid: 0000000000000000e000000000000000, type: 0}
   gizmoMaterial: {fileID: 2100000, guid: e6957d0929cb4984b9e81c230b5d556c, type: 2}
   showGizmos: 0
---- !u!114 &8832882286226696861
+--- !u!114 &1785549713064623944
 MonoBehaviour:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 7076232929667900906}
+  m_GameObject: {fileID: 6672154894511306159}
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 33dc8d3e0d04c43449bb4db6a9a95938, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::SimpleMarchingCubeGenerator
-  densityField: {fileID: 8701791712679606834}
+  densityField: {fileID: 2337694947619419911}
   terrainConfig: {fileID: 11400000, guid: 9138cb2e2bed7664a93a49b7884fcf39, type: 2}
   interpolateMode: 0
---- !u!33 &-5568167845808975363
+--- !u!33 &5878650048686719144
 MeshFilter:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 7076232929667900906}
+  m_GameObject: {fileID: 6672154894511306159}
   m_Mesh: {fileID: 0}
---- !u!23 &606376169296131774
+--- !u!23 &201887917816741587
 MeshRenderer:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 7076232929667900906}
+  m_GameObject: {fileID: 6672154894511306159}
   m_Enabled: 1
   m_CastShadows: 1
   m_ReceiveShadows: 1
@@ -124,13 +124,13 @@ MeshRenderer:
   m_SortingOrder: 0
   m_MaskInteraction: 0
   m_AdditionalVertexStreams: {fileID: 0}
---- !u!64 &-5836973978567368976
+--- !u!64 &2435745110987640468
 MeshCollider:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 7076232929667900906}
+  m_GameObject: {fileID: 6672154894511306159}
   m_Material: {fileID: 0}
   m_IncludeLayers:
     serializedVersion: 2

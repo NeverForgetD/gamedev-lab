@@ -7,8 +7,10 @@ public class SimpleMarchingCubeGenerator : MonoBehaviour
     public enum InterpolateMode { Linear, Half, Smoothstep, Snapping }
 
     [SerializeField] private SimpleDensityField densityField;
-    [SerializeField, Range(-5f, 5f)] private float isoLevel = 0.0f;
-    [SerializeField] private InterpolateMode interpolateMode = InterpolateMode.Linear;
+    [SerializeField] private TerrainConfig      terrainConfig;
+    [SerializeField] private InterpolateMode    interpolateMode = InterpolateMode.Linear;
+
+    private float IsoLevel => terrainConfig != null ? terrainConfig.isoLevel : 0f;
 
     private MeshFilter   meshFilter;
     private MeshRenderer meshRenderer;
@@ -102,7 +104,7 @@ public class SimpleMarchingCubeGenerator : MonoBehaviour
         var cubeIndex = 0;
         for (var i = 0; i < 8; i++)
         {
-            if (fieldBuffer[cubeCorners[i]].density < isoLevel)
+            if (fieldBuffer[cubeCorners[i]].density < IsoLevel)
                 cubeIndex |= (1 << i);
         }
 
@@ -148,7 +150,7 @@ public class SimpleMarchingCubeGenerator : MonoBehaviour
     // density 비율로 표면 위치를 선형으로 찾습니다 (표준)
     private float Linear(float v1, float v2)
     {
-        return (isoLevel - v1) / (v2 - v1);
+        return (IsoLevel - v1) / (v2 - v1);
     }
 
     // density 무시하고 항상 엣지 중간점 → 각진 느낌

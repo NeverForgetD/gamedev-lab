@@ -51,7 +51,7 @@ public class SimpleDensityField : MonoBehaviour
 
     public FieldData[] DensityField => densityField;
     public int         Resolution   => profile.resolution;
-    public float       UnitSize     => profile.unitSize;
+    public float       UnitSize     => profile.UnitSize;
     public float       WorldSize    => profile.WorldSize;
 
     void Start()
@@ -111,7 +111,7 @@ public class SimpleDensityField : MonoBehaviour
             var x   = i % profile.resolution;
             var y   = (i / profile.resolution) % profile.resolution;
             var z   = i / (profile.resolution * profile.resolution);
-            var pos = (new float3(x, y, z) - center) * profile.unitSize + centerPos;
+            var pos = (new float3(x, y, z) - center) * profile.UnitSize + centerPos;
 
             float density = math.distance(pos, centerPos) - profile.sphereRadius;
             if (profile.sphereNoise.applyNoise)
@@ -130,7 +130,7 @@ public class SimpleDensityField : MonoBehaviour
             var x   = i % profile.resolution;
             var y   = (i / profile.resolution) % profile.resolution;
             var z   = i / (profile.resolution * profile.resolution);
-            var pos = (new float3(x, y, z) - center) * profile.unitSize + originPos;
+            var pos = (new float3(x, y, z) - center) * profile.UnitSize + originPos;
 
             float density = pos.y - profile.terrain_baseHeight;
             if (profile.terrainNoise.applyNoise)
@@ -194,7 +194,7 @@ public class SimpleDensityField : MonoBehaviour
         if (gizmoMaterial == null || gizmoMesh == null) return;
 
         int   count = profile.resolution * profile.resolution * profile.resolution;
-        float size  = profile.resolution * profile.unitSize;
+        float size  = profile.resolution * profile.UnitSize;
         bounds = new Bounds(transform.position, new Vector3(size, size, size));
 
         gizmoBuffer = new ComputeBuffer(count, STRIDE);
