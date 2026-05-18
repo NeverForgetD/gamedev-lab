@@ -7,10 +7,15 @@ public class SimpleMarchingCubeGenerator : MonoBehaviour
     public enum InterpolateMode { Linear, Half, Smoothstep, Snapping }
 
     [SerializeField] private SimpleDensityField densityField;
-    [SerializeField] private TerrainConfig      terrainConfig;
     [SerializeField] private InterpolateMode    interpolateMode = InterpolateMode.Linear;
+    [SerializeField, Range(-5f, 5f)] private float isoLevel    = 0f;
+    [SerializeField] private int                lodStep        = 1;
 
-    private float IsoLevel => terrainConfig != null ? terrainConfig.isoLevel : 0f;
+    public int LodStep
+    {
+        get => lodStep;
+        set => lodStep = Mathf.Max(1, value);
+    }
 
     private MeshFilter   meshFilter;
     private MeshRenderer meshRenderer;
@@ -55,18 +60,20 @@ public class SimpleMarchingCubeGenerator : MonoBehaviour
 
     private void GenerateMesh()
     {
-        var fieldBuffer = densityField.DensityField;
-        var resolution  = densityField.Resolution;
-        var origin      = (Unity.Mathematics.float3)transform.position;
+        var fieldBuffer   = densityField.DensityField;
+        var resolution    = densityField.Resolution;   // 큐브 수
+        var pointsPerAxis = resolution + 1;            // 점 수
+        var origin        = (Unity.Mathematics.float3)transform.position;
+        var step          = Mathf.Max(1, lodStep);
 
         vertices.Clear();
         triangleIndices.Clear();
 
-        for (var x = 0; x < resolution - 1; x++)
-        for (var y = 0; y < resolution - 1; y++)
-        for (var z = 0; z < resolution - 1; z++)
+        for (var x = 0; x < resolution; x += step)
+        for (var y = 0; y < resolution; y += step)
+        for (var z = 0; z < resolution; z += step)
         {
-            foreach (var triangle in MarchCube(new int3(x, y, z), resolution, fieldBuffer))
+            foreach (var triangle in MarchCube(new int3(x, y, z), pointsPerAxis, fieldBuffer, step))
             {
                 var i = vertices.Count;
                 vertices.Add((Vector3)(triangle.a - origin));
@@ -90,21 +97,21 @@ public class SimpleMarchingCubeGenerator : MonoBehaviour
         meshCollider.sharedMesh = mesh;
     }
 
-    private List<Triangle> MarchCube(int3 p, int resolution, FieldData[] fieldBuffer)
+    private List<Triangle> MarchCube(int3 p, int pts, FieldData[] fieldBuffer, int step)
     {
-        cubeCorners[0] = Utils.Flatten(new int3(p.x,     p.y,     p.z    ), resolution);
-        cubeCorners[1] = Utils.Flatten(new int3(p.x + 1, p.y,     p.z    ), resolution);
-        cubeCorners[2] = Utils.Flatten(new int3(p.x + 1, p.y,     p.z + 1), resolution);
-        cubeCorners[3] = Utils.Flatten(new int3(p.x,     p.y,     p.z + 1), resolution);
-        cubeCorners[4] = Utils.Flatten(new int3(p.x,     p.y + 1, p.z    ), resolution);
-        cubeCorners[5] = Utils.Flatten(new int3(p.x + 1, p.y + 1, p.z    ), resolution);
-        cubeCorners[6] = Utils.Flatten(new int3(p.x + 1, p.y + 1, p.z + 1), resolution);
-        cubeCorners[7] = Utils.Flatten(new int3(p.x,     p.y + 1, p.z + 1), resolution);
+        cubeCorners[0] = Utils.Flatten(new int3(p.x,        p.y,        p.z       ), pts);
+        cubeCorners[1] = Utils.Flatten(new int3(p.x + step, p.y,        p.z       ), pts);
+        cubeCorners[2] = Utils.Flatten(new int3(p.x + step, p.y,        p.z + step), pts);
+        cubeCorners[3] = Utils.Flatten(new int3(p.x,        p.y,        p.z + step), pts);
+        cubeCorners[4] = Utils.Flatten(new int3(p.x,        p.y + step, p.z       ), pts);
+        cubeCorners[5] = Utils.Flatten(new int3(p.x + step, p.y + step, p.z       ), pts);
+        cubeCorners[6] = Utils.Flatten(new int3(p.x + step, p.y + step, p.z + step), pts);
+        cubeCorners[7] = Utils.Flatten(new int3(p.x,        p.y + step, p.z + step), pts);
 
         var cubeIndex = 0;
         for (var i = 0; i < 8; i++)
         {
-            if (fieldBuffer[cubeCorners[i]].density < IsoLevel)
+            if (fieldBuffer[cubeCorners[i]].density < isoLevel)
                 cubeIndex |= (1 << i);
         }
 
@@ -147,7 +154,7 @@ public class SimpleMarchingCubeGenerator : MonoBehaviour
         return p1 + t * (p2 - p1);
     }
 
-    private float Linear(float v1, float v2)    => (IsoLevel - v1) / (v2 - v1);
+    private float Linear(float v1, float v2)    => (isoLevel - v1) / (v2 - v1);
     private float Half()                         => 0.5f;
     private float Smoothstep(float v1, float v2) { var t = Linear(v1, v2); return t * t * (3f - 2f * t); }
     private float Snapping(float v1, float v2, float snap = 0.2f)

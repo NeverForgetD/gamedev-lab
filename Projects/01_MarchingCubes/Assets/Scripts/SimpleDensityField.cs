@@ -70,7 +70,8 @@ public class SimpleDensityField : MonoBehaviour
     {
         if (profile == null) { Debug.LogError("ChunkProfile not assigned", this); return; }
 
-        int count = profile.resolution * profile.resolution * profile.resolution;
+        int pts   = profile.resolution + 1;
+        int count = pts * pts * pts;
         densityField = new FieldData[count];
         deltaField   = new float[count];
         RefreshField();
@@ -97,20 +98,21 @@ public class SimpleDensityField : MonoBehaviour
 
     private float3 GetCenter() => profile.fieldType switch
     {
-        FieldType.Sphere    => new float3(1, 1, 1) * (profile.resolution - 1) / 2f,
-        FieldType.Terrain2D => new float3((profile.resolution - 1) / 2f, 0f, (profile.resolution - 1) / 2f),
-        _                   => new float3(1, 1, 1) * (profile.resolution - 1) / 2f
+        FieldType.Sphere    => new float3(1, 1, 1) * profile.resolution / 2f,
+        FieldType.Terrain2D => new float3(profile.resolution / 2f, 0f, profile.resolution / 2f),
+        _                   => new float3(1, 1, 1) * profile.resolution / 2f
     };
 
-    // ── Sphere (노이즈: 3D) ───────────────────────────────────────
+    // ── Sphere ────────────────────────────────────────────────────
     private void CreateSphere(float3 centerPos)
     {
+        int pts    = profile.resolution + 1;
         var center = GetCenter();
         for (var i = 0; i < densityField.Length; i++)
         {
-            var x   = i % profile.resolution;
-            var y   = (i / profile.resolution) % profile.resolution;
-            var z   = i / (profile.resolution * profile.resolution);
+            var x   = i % pts;
+            var y   = (i / pts) % pts;
+            var z   = i / (pts * pts);
             var pos = (new float3(x, y, z) - center) * profile.UnitSize + centerPos;
 
             float density = math.distance(pos, centerPos) - profile.sphereRadius;
@@ -121,15 +123,16 @@ public class SimpleDensityField : MonoBehaviour
         }
     }
 
-    // ── Terrain2D (노이즈: 2D xz) ─────────────────────────────────
+    // ── Terrain2D ─────────────────────────────────────────────────
     private void CreateTerrain2D(float3 originPos)
     {
+        int pts    = profile.resolution + 1;
         var center = GetCenter();
         for (var i = 0; i < densityField.Length; i++)
         {
-            var x   = i % profile.resolution;
-            var y   = (i / profile.resolution) % profile.resolution;
-            var z   = i / (profile.resolution * profile.resolution);
+            var x   = i % pts;
+            var y   = (i / pts) % pts;
+            var z   = i / (pts * pts);
             var pos = (new float3(x, y, z) - center) * profile.UnitSize + originPos;
 
             float density = pos.y - profile.terrain_baseHeight;
@@ -168,8 +171,6 @@ public class SimpleDensityField : MonoBehaviour
     }
 
     // ── Terrain Edit ──────────────────────────────────────────────
-    // delta > 0 : 파내기 (density 올림 → 공기)
-    // delta < 0 : 채우기 (density 내림 → 땅)
     public void ModifyDensity(float3 center, float radius, float delta)
     {
         float radiusSq = radius * radius;
@@ -193,8 +194,9 @@ public class SimpleDensityField : MonoBehaviour
     {
         if (gizmoMaterial == null || gizmoMesh == null) return;
 
-        int   count = profile.resolution * profile.resolution * profile.resolution;
-        float size  = profile.resolution * profile.UnitSize;
+        int pts   = profile.resolution + 1;
+        int count = pts * pts * pts;
+        float size = profile.WorldSize;
         bounds = new Bounds(transform.position, new Vector3(size, size, size));
 
         gizmoBuffer = new ComputeBuffer(count, STRIDE);

@@ -65,8 +65,9 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::SimpleMarchingCubeGenerator
   densityField: {fileID: 8701791712679606834}
-  terrainConfig: {fileID: 11400000, guid: 9138cb2e2bed7664a93a49b7884fcf39, type: 2}
   interpolateMode: 0
+  isoLevel: 0
+  lodStep: 1
 --- !u!33 &-5568167845808975363
 MeshFilter:
   m_ObjectHideFlags: 0

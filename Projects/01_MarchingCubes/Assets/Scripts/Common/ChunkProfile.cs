@@ -3,12 +3,10 @@ using UnityEngine;
 [CreateAssetMenu(menuName = "MarchingCubes/ChunkProfile")]
 public class ChunkProfile : ScriptableObject
 {
-    [Header("Config")]
-    public TerrainConfig terrainConfig;
-
     [Header("Field")]
     public SimpleDensityField.FieldType fieldType  = SimpleDensityField.FieldType.Terrain2D;
-    public int resolution = 16;
+    public int   resolution = 16;
+    public float worldSize  = 16f;
 
     [Header("Terrain2D")]
     public float         terrain_baseHeight = 5f;
@@ -28,6 +26,6 @@ public class ChunkProfile : ScriptableObject
         amplitude  = 2f,
     };
 
-    public float UnitSize  => terrainConfig != null ? terrainConfig.worldSize / (resolution - 1) : 1f;
-    public float WorldSize => terrainConfig != null ? terrainConfig.worldSize : (resolution - 1) * 1f;
+    public float UnitSize  => worldSize / resolution;
+    public float WorldSize => worldSize;
 }
