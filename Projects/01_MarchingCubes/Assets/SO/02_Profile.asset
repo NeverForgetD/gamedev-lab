@@ -12,9 +12,9 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 4a92e6efdfdaf094d88515e6ad112f46, type: 3}
   m_Name: 02_Profile
   m_EditorClassIdentifier: Assembly-CSharp::ChunkProfile
+  terrainConfig: {fileID: 11400000, guid: 9138cb2e2bed7664a93a49b7884fcf39, type: 2}
   fieldType: 1
   resolution: 8
-  unitSize: 2
   terrain_baseHeight: 5
   terrainNoise:
     applyNoise: 1
