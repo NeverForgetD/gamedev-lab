@@ -3,72 +3,64 @@ using UnityEngine;
 
 public class ChunkManager : MonoBehaviour
 {
-    [SerializeField] private Transform   player;
-    [SerializeField] private GameObject  chunkPrefab;
-    [SerializeField] private int         renderDistance     = 3;
-    [SerializeField] private int         backRenderDistance = 1;
-    [SerializeField] private int         chunksPerFrame     = 2;
+    [SerializeField] private GameObject chunkPrefab;
+    [SerializeField] private Transform  player;
+    [SerializeField] private Camera     cam;
 
-    private float chunkWorldSize;
+    [Header("Streaming")]
+    [SerializeField] private int renderDistance = 3;
+    [SerializeField] private int chunksPerFrame = 2;
 
-    private Vector2Int                        lastPlayerChunk = new(int.MaxValue, int.MaxValue);
-    private Dictionary<Vector2Int, GameObject> activeChunks   = new();
-    private Queue<Vector2Int>                  generateQueue  = new();
-    private HashSet<Vector2Int>                queued         = new();
-
-    void Start()
+    private struct ChunkEntry
     {
-        var sdf = chunkPrefab.GetComponent<SimpleDensityField>();
-        chunkWorldSize = (sdf.Resolution - 1) * sdf.UnitSize;
-
-        UpdateChunks(WorldToChunk(player.position));
+        public SimpleDensityField field;
+        public MeshRenderer       renderer;
     }
 
-    void Update()
+    private Dictionary<Vector2Int, ChunkEntry> activeChunks  = new();
+    private Queue<GameObject>                  pool          = new();
+    private List<Vector2Int>                   generateQueue = new();
+    private Plane[]                            frustumPlanes = new Plane[6];
+
+    private Vector2Int lastPlayerChunk = new(int.MaxValue, int.MaxValue);
+    private float      chunkWorldSize;
+
+    private void Start()
     {
-        var playerChunk = WorldToChunk(player.position);
+        var sampleField = chunkPrefab.GetComponent<SimpleDensityField>();
+        chunkWorldSize = sampleField.WorldSize;
 
-        if (playerChunk != lastPlayerChunk)
+        int side     = renderDistance * 2 + 1;
+        int poolSize = side * side;
+        for (int i = 0; i < poolSize; i++)
         {
-            lastPlayerChunk = playerChunk;
-            UpdateChunks(playerChunk);
+            var go = Instantiate(chunkPrefab, transform);
+            go.SetActive(false);
+            pool.Enqueue(go);
         }
 
-        int spawned = 0;
-        while (spawned < chunksPerFrame && generateQueue.Count > 0)
-        {
-            var coord = generateQueue.Dequeue();
-            queued.Remove(coord);
-            if (!activeChunks.ContainsKey(coord))
-                SpawnChunk(coord);
-            spawned++;
-        }
+        UpdateChunks();
     }
 
-    private void UpdateChunks(Vector2Int center)
+    private void Update()
     {
-        Vector3 fwd   = player.forward;
-        var     fwd2D = new Vector2(fwd.x, fwd.z).normalized;
+        var currentChunk = WorldToChunk(player.position);
+        if (currentChunk != lastPlayerChunk)
+        {
+            lastPlayerChunk = currentChunk;
+            UpdateChunks();
+        }
 
+        ProcessGenerateQueue();
+        UpdateFrustumVisibility();
+    }
+
+    private void UpdateChunks()
+    {
         var needed = new HashSet<Vector2Int>();
-        int range  = Mathf.Max(renderDistance, backRenderDistance);
-
-        for (int x = -range; x <= range; x++)
-        for (int z = -range; z <= range; z++)
-        {
-            var coord = new Vector2Int(center.x + x, center.y + z);
-            var dir2D = new Vector2(x, z);
-            int dist  = Mathf.RoundToInt(dir2D.magnitude);
-
-            if (dist == 0) { needed.Add(coord); continue; }
-
-            float dot   = Vector2.Dot(dir2D.normalized, fwd2D);
-            bool  front = dot >= -0.2f;
-            int   limit = front ? renderDistance : backRenderDistance;
-
-            if (dist <= limit)
-                needed.Add(coord);
-        }
+        for (int x = -renderDistance; x <= renderDistance; x++)
+        for (int z = -renderDistance; z <= renderDistance; z++)
+            needed.Add(lastPlayerChunk + new Vector2Int(x, z));
 
         var toRemove = new List<Vector2Int>();
         foreach (var coord in activeChunks.Keys)
@@ -76,62 +68,102 @@ public class ChunkManager : MonoBehaviour
 
         foreach (var coord in toRemove)
         {
-            Destroy(activeChunks[coord]);
+            var entry = activeChunks[coord];
+            entry.field.ResetField();
+            entry.field.gameObject.SetActive(false);
+            pool.Enqueue(entry.field.gameObject);
             activeChunks.Remove(coord);
+            generateQueue.Remove(coord);
         }
 
-        var toQueue = new List<Vector2Int>();
         foreach (var coord in needed)
-            if (!activeChunks.ContainsKey(coord) && !queued.Contains(coord))
-                toQueue.Add(coord);
-
-        toQueue.Sort((a, b) => SqrDist(a, center).CompareTo(SqrDist(b, center)));
-
-        foreach (var coord in toQueue)
         {
-            generateQueue.Enqueue(coord);
-            queued.Add(coord);
+            if (activeChunks.ContainsKey(coord)) continue;
+            if (pool.Count == 0) continue;
+
+            var go = pool.Dequeue();
+            go.transform.position = ChunkToWorld(coord);
+            go.name = $"Chunk_{coord.x}_{coord.y}";
+            go.SetActive(true);
+
+            activeChunks[coord] = new ChunkEntry
+            {
+                field    = go.GetComponent<SimpleDensityField>(),
+                renderer = go.GetComponent<MeshRenderer>(),
+            };
+
+            generateQueue.Add(coord);
+        }
+
+        SortGenerateQueue();
+    }
+
+    private void ProcessGenerateQueue()
+    {
+        int count = 0;
+        while (generateQueue.Count > 0 && count < chunksPerFrame)
+        {
+            var coord = generateQueue[0];
+            generateQueue.RemoveAt(0);
+
+            if (activeChunks.TryGetValue(coord, out var entry))
+                entry.field.InitField();
+
+            count++;
         }
     }
 
-    private void SpawnChunk(Vector2Int coord)
+    private void UpdateFrustumVisibility()
     {
-        var worldPos = new Vector3(coord.x * chunkWorldSize, 0f, coord.y * chunkWorldSize);
-        var chunk    = Instantiate(chunkPrefab, worldPos, Quaternion.identity, transform);
-        chunk.name   = $"Chunk_{coord.x}_{coord.y}";
-        activeChunks[coord] = chunk;
+        if (cam == null) return;
+
+        GeometryUtility.CalculateFrustumPlanes(cam, frustumPlanes);
+        float half = chunkWorldSize * 0.5f;
+
+        foreach (var (coord, entry) in activeChunks)
+        {
+            if (entry.renderer == null) continue;
+            var center = ChunkToWorld(coord) + new Vector3(0f, half, 0f);
+            var bounds = new Bounds(center, new Vector3(chunkWorldSize, chunkWorldSize, chunkWorldSize));
+            entry.renderer.enabled = GeometryUtility.TestPlanesAABB(frustumPlanes, bounds);
+        }
     }
 
     public List<SimpleDensityField> GetChunksInRadius(Vector3 worldPos, float radius)
     {
         var   result   = new List<SimpleDensityField>();
         float halfSize = chunkWorldSize * 0.5f;
+        float radiusSq = radius * radius;
 
-        foreach (var kvp in activeChunks)
+        foreach (var (coord, entry) in activeChunks)
         {
-            var sdf = kvp.Value.GetComponent<SimpleDensityField>();
-            if (sdf == null) continue;
+            var   center = ChunkToWorld(coord);
+            float cx     = Mathf.Clamp(worldPos.x, center.x - halfSize, center.x + halfSize);
+            float cz     = Mathf.Clamp(worldPos.z, center.z - halfSize, center.z + halfSize);
+            float dx     = worldPos.x - cx;
+            float dz     = worldPos.z - cz;
 
-            Vector3 center = kvp.Value.transform.position;
-            float   cx     = Mathf.Clamp(worldPos.x, center.x - halfSize, center.x + halfSize);
-            float   cz     = Mathf.Clamp(worldPos.z, center.z - halfSize, center.z + halfSize);
-            float   dx     = worldPos.x - cx;
-            float   dz     = worldPos.z - cz;
-
-            if (dx * dx + dz * dz <= radius * radius)
-                result.Add(sdf);
+            if (dx * dx + dz * dz <= radiusSq)
+                result.Add(entry.field);
         }
         return result;
     }
 
     private Vector2Int WorldToChunk(Vector3 pos) => new(
-        Mathf.FloorToInt(pos.x / chunkWorldSize),
-        Mathf.FloorToInt(pos.z / chunkWorldSize)
+        Mathf.RoundToInt(pos.x / chunkWorldSize),
+        Mathf.RoundToInt(pos.z / chunkWorldSize)
     );
 
-    private static int SqrDist(Vector2Int a, Vector2Int b)
+    private Vector3 ChunkToWorld(Vector2Int coord) =>
+        new Vector3(coord.x * chunkWorldSize, 0f, coord.y * chunkWorldSize);
+
+    private void SortGenerateQueue()
     {
-        int dx = a.x - b.x, dz = a.y - b.y;
-        return dx * dx + dz * dz;
+        var playerChunk = lastPlayerChunk;
+        generateQueue.Sort((a, b) =>
+            ManhattanDist(a, playerChunk).CompareTo(ManhattanDist(b, playerChunk)));
     }
+
+    private static int ManhattanDist(Vector2Int a, Vector2Int b)
+        => Mathf.Abs(a.x - b.x) + Mathf.Abs(a.y - b.y);
 }

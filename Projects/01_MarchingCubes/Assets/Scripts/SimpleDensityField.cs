@@ -1,3 +1,4 @@
+using System;
 using Unity.Mathematics;
 using UnityEngine;
 
@@ -67,6 +68,7 @@ public class SimpleDensityField : MonoBehaviour
     public FieldData[] DensityField => densityField;
     public int         Resolution   => resolution;
     public float       UnitSize     => unitSize;
+    public float       WorldSize    => (resolution - 1) * unitSize;
 
     void Start()
     {
@@ -90,6 +92,20 @@ public class SimpleDensityField : MonoBehaviour
     }
 
     public void ClearDirty() => IsDirty = false;
+
+    public void SetResolution(int newResolution)
+    {
+        resolution = newResolution;
+        deltaField = null;
+        InitField();
+    }
+
+    public void ResetField()
+    {
+        if (deltaField != null)
+            Array.Clear(deltaField, 0, deltaField.Length);
+        IsDirty = false;
+    }
 
     private void RefreshField()
     {
