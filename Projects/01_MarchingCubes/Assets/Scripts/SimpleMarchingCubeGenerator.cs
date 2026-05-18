@@ -47,6 +47,7 @@ public class SimpleMarchingCubeGenerator : MonoBehaviour
 
     private void OnDisable()
     {
+        if (meshCollider != null) meshCollider.sharedMesh = null;
         mesh?.Clear();
     }
 
