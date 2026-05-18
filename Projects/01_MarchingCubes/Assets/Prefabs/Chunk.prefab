@@ -63,7 +63,7 @@ MonoBehaviour:
     amplitude: 5
   gizmoMesh: {fileID: 10207, guid: 0000000000000000e000000000000000, type: 0}
   gizmoMaterial: {fileID: 2100000, guid: e6957d0929cb4984b9e81c230b5d556c, type: 2}
-  showGizmos: 1
+  showGizmos: 0
 --- !u!114 &8832882286226696861
 MonoBehaviour:
   m_ObjectHideFlags: 0
