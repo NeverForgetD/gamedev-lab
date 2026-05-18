@@ -79,6 +79,7 @@ public class SimpleDensityField : MonoBehaviour
     }
 
     public void ClearDirty() => IsDirty = false;
+    public void MarkDirty()  => IsDirty = true;
 
     public void ResetField()
     {
