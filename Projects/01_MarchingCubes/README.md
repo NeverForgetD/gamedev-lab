@@ -3,8 +3,6 @@
 A real-time voxel terrain system built in Unity, implementing the Marching Cubes algorithm from scratch.  
 Supports runtime terrain editing, chunk streaming, frustum culling, and object pooling.
 
-> **Final Demo** → `[VIDEO LINK]`
-
 ---
 
 ## Tech Stack
@@ -18,11 +16,13 @@ Supports runtime terrain editing, chunk streaming, frustum culling, and object p
 
 ## Core Implementation
 
-### 1. Density Field Visualization
+### 1. Density Field Visualization & Marching Cubes Mesh Generation
+
+> `[VIDEO 1]`
+
+#### Density Field Visualization
 
 Before generating any mesh, the scalar field itself is visualized as a 3D grid of instanced dots — one per sample point — using a fully GPU-driven draw pipeline.
-
-> **Week 1 — Density Field Gizmo** → `[VIDEO LINK]`
 
 **Data upload**  
 All sample points are packed into a `FieldData` struct (world position + density value) and uploaded to the GPU as a `ComputeBuffer` with a 16-byte stride. The buffer is refreshed whenever the field is modified.
@@ -44,13 +44,9 @@ Each instance reads its own `FieldData` entry from the structured buffer using `
 **Density-based color**  
 The shader branches on the sign of `density`: negative values (inside the isosurface) render in one color, positive values (outside) in another. This makes the field boundary immediately readable at a glance.
 
----
-
-### 2. Marching Cubes Mesh Generation
+#### Marching Cubes Mesh Generation
 
 The isosurface is extracted per-frame by marching through every cube in the density grid and emitting triangles wherever the surface crosses an edge.
-
-> **Week 1 — Basic Mesh Generation** → `[VIDEO LINK]`
 
 **CubeIndex bitmask**  
 For each cube, the 8 corner densities are compared against `isoLevel`. Each corner contributes one bit to a `cubeIndex` (0–255), encoding which corners lie inside the surface.
@@ -83,7 +79,7 @@ A `lodStep` parameter skips every N grid cells when marching, reducing triangle 
 
 ---
 
-### 3. Density Field Types — SDF-based
+### 2. Density Field Types — SDF-based
 
 The density field is generated analytically using a Signed Distance Field convention: negative values are inside the surface, positive values are outside, and the zero-crossing defines the mesh.
 
@@ -102,9 +98,9 @@ value += snoise(p * freq) * amp   // repeated 4×, freq ×= 2, amp ×= 0.5
 
 ---
 
-### 4. Chunk Streaming & Runtime Editing
+### 3. Chunk Streaming & Runtime Editing
 
-> **Week 2 — Chunk System & Terrain Editor** → `[VIDEO LINK]`
+> `[VIDEO 2]`
 
 **Chunk Manager**  
 The world is divided into fixed-size chunks on the XZ plane. Each frame, `ChunkManager` computes the player's current chunk coordinate and maintains a square region of `renderDistance` chunks in every direction. Chunks that leave the region are returned to a pool; newly needed chunks are pulled from the pool and added to a generation queue.
@@ -135,10 +131,40 @@ Every chunk's parameters (resolution, world size, field type, noise settings, sp
 
 ---
 
+### 4. Optimization Pass — Pooling, Culling & LOD
+
+> `[VIDEO 3]`
+
+This pass focused on reducing per-frame CPU cost as chunk count scaled up.
+
+- **Object Pooling** eliminated runtime allocation by pre-warming a fixed pool of chunk GameObjects at startup. Returning a chunk safely nulls the MeshCollider reference before clearing the mesh, avoiding a Unity engine crash when shared mesh data is freed while the collider still holds it.
+- **Frustum Culling** disables MeshRenderer on out-of-view chunks each frame, cutting GPU submissions without destroying the chunk.
+- **ScriptableObject refactor** decoupled world parameters into a `ChunkProfile` asset. Resolution, world size, noise settings, and field type are now hot-swappable at edit time without touching code.
+- **LOD step** exposes a `lodStep` integer on the generator. Distant chunks march with a larger step size, producing sparser meshes while sharing the same density buffer.
+
+---
+
+### 5. Job System & Mesh Threading *(In Progress)*
+
+Currently, the Marching Cubes loop runs on the main thread inside `Update`. For a `resolution` of 32, a single chunk generates ~32,768 cube evaluations per frame — and multiple chunks loading simultaneously stall the frame.
+
+**Planned approach**  
+The mesh generation loop will be ported to Unity's Job System with Burst compilation. The marching loop body (`MarchCube`) is a pure function with no managed allocations, making it a natural fit for `IJobParallelFor`. Each job processes a slice of the XZ grid independently; results are written into a `NativeList<Triangle>` and flushed to the `Mesh` API via `Mesh.ApplyAndDisposeWritableMeshData` on the main thread.
+
+Moving generation off the main thread means chunks can be built over several frames without a hitch, decoupled from the throttle-per-frame workaround currently used.
+
+**Smooth shading**  
+The current pipeline emits unshared vertices — every triangle gets its own three vertices — so `RecalculateNormals` produces flat (faceted) shading. Smooth shading requires shared vertices: adjacent triangles must reference the same vertex index so Unity can average normals across the shared edge.
+
+This means replacing the current append-only vertex list with a dictionary-based deduplication pass: for each computed edge vertex, look up whether a vertex at that world position was already emitted; if so, reuse its index; if not, insert it. The tradeoff is a more complex build step but significantly better visual quality and a smaller vertex buffer.
+
+---
+
 ## Development Timeline
 
 | Week | Focus | Video |
 |------|-------|-------|
-| Week 1 | Marching Cubes algorithm · Sphere SDF · 2D terrain noise · Density field gizmo | `[VIDEO LINK]` |
-| Week 2 | Chunk Manager · Terrain shader · Player controller · Real-time terrain editor | `[VIDEO LINK]` |
-| Week 3 | Object pooling · Frustum culling · ScriptableObject refactor · LOD step | `[VIDEO LINK]` |
+| Week 1 | Marching Cubes algorithm · Sphere SDF · 2D terrain noise · Density field gizmo | `[VIDEO 1]` |
+| Week 2 | Chunk Manager · Terrain shader · Player controller · Real-time terrain editor | `[VIDEO 2]` |
+| Week 3 | Object pooling · Frustum culling · ScriptableObject refactor · LOD step | `[VIDEO 3]` |
+| Week 4 | Job System · Burst compilation · Threaded mesh build · Smooth shading *(in progress)* | — |
