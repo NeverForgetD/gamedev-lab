@@ -3,6 +3,8 @@
 A real-time voxel terrain system built in Unity, implementing the Marching Cubes algorithm from scratch.  
 Supports runtime terrain editing, chunk streaming, frustum culling, and object pooling.
 
+📺 **Full Playlist** → [Marching Cubes Dev Log — Unity](https://www.youtube.com/playlist?list=PLMOHfwfnIA6YzE3734cBiDpQrf6P25GbO)
+
 ---
 
 ## 🛠️ Tech Stack
@@ -18,7 +20,7 @@ Supports runtime terrain editing, chunk streaming, frustum culling, and object p
 
 ### 1. 🔵 Density Field Visualization & Marching Cubes Mesh Generation
 
-> `[VIDEO 1]`
+> ▶ [Density Field Visualization & Marching Cubes — Week 1](https://youtu.be/thkhvTRmsXE)
 
 #### Density Field Visualization
 
@@ -100,7 +102,7 @@ value += snoise(p * freq) * amp   // repeated 4×, freq ×= 2, amp ×= 0.5
 
 ### 3. 🗺️ Chunk Streaming & Runtime Editing
 
-> `[VIDEO 2]`
+> ▶ [Chunk Streaming, Object Pooling & Terrain Editor — Week 2](https://youtu.be/zwa8Fl17JaM)
 
 **🧩 Chunk Manager**  
 The world is divided into fixed-size chunks on the XZ plane. Each frame, `ChunkManager` computes the player's current chunk coordinate and maintains a square region of `renderDistance` chunks in every direction. Chunks that leave the region are returned to a pool; newly needed chunks are pulled from the pool and added to a generation queue.
@@ -133,7 +135,7 @@ Every chunk's parameters (resolution, world size, field type, noise settings, sp
 
 ### 4. 🚀 Optimization Pass — Pooling, Culling & LOD
 
-> `[VIDEO 3]`
+> ▶ [Optimization Pass: Pooling, Culling & LOD — Week 3](https://youtu.be/pRhWY_OiF5Y)
 
 This pass focused on reducing per-frame CPU cost as chunk count scaled up.
 
@@ -164,7 +166,7 @@ This means replacing the current append-only vertex list with a dictionary-based
 
 | Week | Focus | Video |
 |------|-------|-------|
-| Week 1 | Marching Cubes algorithm · Sphere SDF · 2D terrain noise · Density field gizmo | `[VIDEO 1]` |
-| Week 2 | Chunk Manager · Terrain shader · Player controller · Real-time terrain editor | `[VIDEO 2]` |
-| Week 3 | Object pooling · Frustum culling · ScriptableObject refactor · LOD step | `[VIDEO 3]` |
+| Week 1 | Marching Cubes algorithm · Sphere SDF · 2D terrain noise · Density field gizmo | [▶ Week 1](https://youtu.be/thkhvTRmsXE) |
+| Week 2 | Chunk Manager · Terrain shader · Player controller · Real-time terrain editor | [▶ Week 2](https://youtu.be/zwa8Fl17JaM) |
+| Week 3 | Object pooling · Frustum culling · ScriptableObject refactor · LOD step | [▶ Week 3](https://youtu.be/pRhWY_OiF5Y) |
 | Week 4 | Job System · Burst compilation · Threaded mesh build · Smooth shading *(in progress)* | — |
