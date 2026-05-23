@@ -69,6 +69,8 @@ MonoBehaviour:
   isoLevel: 0
   lodStep: 1
   smoothShading: 1
+  enableCollider: 1
+  colliderMaxLodStep: 2
 --- !u!33 &-5568167845808975363
 MeshFilter:
   m_ObjectHideFlags: 0

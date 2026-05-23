@@ -3,6 +3,16 @@ using Unity.Jobs;
 using Unity.Mathematics;
 using UnityEngine;
 
+// ── Collider 비동기 베이킹 Job ────────────────────────────────────────────
+// Physics.BakeMesh 는 워커 스레드에서 호출 가능 (Unity 2022+)
+// Burst 비호환(managed API) → [BurstCompile] 없음
+public struct BakeMeshJob : IJob
+{
+    public int MeshInstanceId;
+    public void Execute() => Physics.BakeMesh(MeshInstanceId, false);
+}
+
+// ─────────────────────────────────────────────────────────────────────────
 public class SimpleMarchingCubeGenerator : MonoBehaviour
 {
     public enum InterpolateMode { Linear, Half, Smoothstep, Snapping }
@@ -16,27 +26,36 @@ public class SimpleMarchingCubeGenerator : MonoBehaviour
     [Tooltip("ON = 중복 버텍스 제거 + 스무스 셰이딩 / OFF = 플랫 셰이딩")]
     [SerializeField] private bool smoothShading = true;
 
+    [Header("Collider")]
+    [Tooltip("OFF = 충돌 메시 생성 안 함 (원거리 청크 등에 활용)")]
+    [SerializeField] private bool enableCollider = true;
+    [Tooltip("이 LodStep 초과 시 콜라이더 베이킹 스킵 (0 = 항상 베이킹)")]
+    [SerializeField] private int  colliderMaxLodStep = 2;
+
+    // ── 프로퍼티 ──────────────────────────────────────────────────────
     public int LodStep
     {
         get => lodStep;
         set => lodStep = Mathf.Max(1, value);
     }
 
+    // ── 컴포넌트 ──────────────────────────────────────────────────────
     private MeshFilter   meshFilter;
     private MeshRenderer meshRenderer;
     private MeshCollider meshCollider;
     private Mesh         mesh;
 
-    // ── Job 상태 ──────────────────────────────────────────────────────
+    // ── MC Job 상태 ───────────────────────────────────────────────────
     private JobHandle    mcJobHandle;
     private NativeStream triangleStream;
     private int          totalCellCount;
     private bool         isMcJobRunning;
 
+    // ── Bake Job 상태 ─────────────────────────────────────────────────
+    private JobHandle bakeJobHandle;
+    private bool      isBakeRunning;
+
     // ── 양자화 스케일 ─────────────────────────────────────────────────
-    // 버텍스 위치를 정수 키로 변환할 때 쓰는 배율.
-    // 1/UnitSize * 1000 정도면 부동소수점 오차(~1e-6)를 흡수하면서
-    // 실제 다른 두 점은 구별할 수 있다.
     private const float QUANT_SCALE = 10000f;
 
     // ─────────────────────────────────────────────────────────────────
@@ -61,17 +80,28 @@ public class SimpleMarchingCubeGenerator : MonoBehaviour
 
     private void LateUpdate()
     {
+        // ① MC Job 완료 → 메시 업로드 + Bake Job 예약
         if (isMcJobRunning && mcJobHandle.IsCompleted)
         {
             mcJobHandle.Complete();
             isMcJobRunning = false;
             BuildMesh();
         }
+
+        // ② Bake Job 완료 → 콜라이더에 반영
+        if (isBakeRunning && bakeJobHandle.IsCompleted)
+        {
+            bakeJobHandle.Complete();
+            isBakeRunning = false;
+            meshCollider.sharedMesh = null;
+            meshCollider.sharedMesh = mesh;
+        }
     }
 
     private void OnDisable()
     {
         CompleteMcJob();
+        CompleteBakeJob();
         if (meshCollider != null) meshCollider.sharedMesh = null;
         mesh?.Clear();
     }
@@ -79,10 +109,25 @@ public class SimpleMarchingCubeGenerator : MonoBehaviour
     private void OnDestroy()
     {
         CompleteMcJob();
+        CompleteBakeJob();
     }
 
     // ─────────────────────────────────────────────────────────────────
-    // Job 예약
+    // 외부 API
+    // ─────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// LOD 변경 등 외부에서 메시 재생성을 요청할 때 호출.
+    /// 밀도 재계산 없이 MC Job 만 다시 예약한다.
+    /// </summary>
+    public void TriggerRebuild()
+    {
+        if (isMcJobRunning) return; // 진행 중이면 완료 후 자동 처리
+        densityField.MarkDirty();
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    // MC Job 예약
     // ─────────────────────────────────────────────────────────────────
     private void ScheduleGeneration()
     {
@@ -109,15 +154,18 @@ public class SimpleMarchingCubeGenerator : MonoBehaviour
         int batch      = Mathf.Max(8, totalCellCount / (SystemInfo.processorCount * 4));
         mcJobHandle    = job.Schedule(totalCellCount, batch);
         isMcJobRunning = true;
+
+        // densityField 의 다음 쓰기 Job 이 이 읽기 Job 완료를 기다리도록 등록
+        densityField.RegisterReaderHandle(mcJobHandle);
     }
 
     // ─────────────────────────────────────────────────────────────────
-    // 메시 업로드
+    // 메시 빌드 (MC Job 완료 후 main thread)
     // ─────────────────────────────────────────────────────────────────
     private void BuildMesh()
     {
         var reader       = triangleStream.AsReader();
-        int estimatedMax = totalCellCount * 5; // 셀당 최대 5 삼각형
+        int estimatedMax = totalCellCount * 5;
 
         var indices = new NativeList<int>(estimatedMax * 3, Allocator.Temp);
 
@@ -129,19 +177,17 @@ public class SimpleMarchingCubeGenerator : MonoBehaviour
         triangleStream.Dispose();
         indices.Dispose();
 
-        meshCollider.sharedMesh = null;
-        meshCollider.sharedMesh = mesh;
+        // 콜라이더는 별도 Job 으로 비동기 처리
+        ScheduleColliderBake();
     }
 
-    // ── 스무스 셰이딩 : 버텍스 공유 ──────────────────────────────────
+    // ── 스무스 셰이딩 ─────────────────────────────────────────────────
     private void BuildSmooth(NativeStream.Reader reader,
                              int estimatedMax, ref NativeList<int> indices)
     {
-        // 양자화 키 → 버텍스 인덱스
         var vertexMap = new NativeHashMap<int3, int>(estimatedMax * 3, Allocator.Temp);
         var vertices  = new NativeList<Vector3>(estimatedMax * 3, Allocator.Temp);
-
-        var origin = (float3)transform.position;
+        var origin    = (float3)transform.position;
 
         for (int i = 0; i < totalCellCount; i++)
         {
@@ -161,7 +207,7 @@ public class SimpleMarchingCubeGenerator : MonoBehaviour
         vertices.Dispose();
     }
 
-    // ── 플랫 셰이딩 : 삼각형마다 독립 버텍스 ────────────────────────
+    // ── 플랫 셰이딩 ───────────────────────────────────────────────────
     private void BuildFlat(NativeStream.Reader reader,
                            int estimatedMax, ref NativeList<int> indices)
     {
@@ -194,25 +240,39 @@ public class SimpleMarchingCubeGenerator : MonoBehaviour
     {
         mesh.Clear();
         mesh.SetVertices(vertices);
-        // SetIndices : NativeArray<int> 직접 수용 → ToArray() 불필요
         mesh.SetIndices(indices.AsArray(), MeshTopology.Triangles, 0);
-        mesh.RecalculateNormals();  // 공유 버텍스면 평균 노멀 → 스무스
+        mesh.RecalculateNormals();
         mesh.RecalculateBounds();
         meshFilter.mesh = mesh;
     }
 
     // ─────────────────────────────────────────────────────────────────
+    // 콜라이더 비동기 베이킹
+    // ─────────────────────────────────────────────────────────────────
+    private void ScheduleColliderBake()
+    {
+        // 조건 : 콜라이더 비활성화 또는 LodStep 초과 시 스킵
+        if (!enableCollider || (colliderMaxLodStep > 0 && lodStep > colliderMaxLodStep))
+        {
+            meshCollider.sharedMesh = null;
+            return;
+        }
+
+        // 이전 Bake 가 아직 실행 중이면 완료 후 재시작
+        CompleteBakeJob();
+
+        // mesh 업로드(SetVertices/SetIndices)가 완료된 시점에서 호출되므로
+        // GetInstanceID() 는 이미 유효한 메시 ID 를 반환한다.
+        bakeJobHandle = new BakeMeshJob { MeshInstanceId = mesh.GetInstanceID() }.Schedule();
+        isBakeRunning = true;
+    }
+
+    // ─────────────────────────────────────────────────────────────────
     // 버텍스 중복 제거 헬퍼
     // ─────────────────────────────────────────────────────────────────
-
-    /// <summary>
-    /// 위치를 QUANT_SCALE 로 양자화한 int3 키로 캐시를 조회.
-    /// 없으면 신규 버텍스로 추가하고 인덱스를 반환한다.
-    /// </summary>
     private static int GetOrAddVertex(float3 pos,
         ref NativeHashMap<int3, int> map, ref NativeList<Vector3> vertices)
     {
-        // 부동소수점 오차를 흡수하는 양자화 키
         var key = new int3(
             (int)math.round(pos.x * QUANT_SCALE),
             (int)math.round(pos.y * QUANT_SCALE),
@@ -228,11 +288,20 @@ public class SimpleMarchingCubeGenerator : MonoBehaviour
     }
 
     // ─────────────────────────────────────────────────────────────────
+    // 안전 종료 헬퍼
+    // ─────────────────────────────────────────────────────────────────
     private void CompleteMcJob()
     {
         if (!isMcJobRunning) return;
         mcJobHandle.Complete();
         isMcJobRunning = false;
         if (triangleStream.IsCreated) triangleStream.Dispose();
+    }
+
+    private void CompleteBakeJob()
+    {
+        if (!isBakeRunning) return;
+        bakeJobHandle.Complete();
+        isBakeRunning = false;
     }
 }

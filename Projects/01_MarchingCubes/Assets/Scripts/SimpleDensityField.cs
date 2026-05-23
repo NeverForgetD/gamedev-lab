@@ -43,6 +43,10 @@ public class SimpleDensityField : MonoBehaviour
     private JobHandle pendingFieldHandle;
     private bool      isFieldJobRunning;
 
+    // densityField 를 [ReadOnly] 로 읽는 외부 Job (MarchingCubesJob 등) 핸들.
+    // 다음 쓰기 Job 예약 시 dependency 로 포함해 Data Race 를 방지한다.
+    private JobHandle readerHandle;
+
     public bool IsDirty           { get; private set; }
     public bool IsFieldJobRunning => isFieldJobRunning;
 
@@ -127,9 +131,22 @@ public class SimpleDensityField : MonoBehaviour
     // 내부 : Job 스케줄링
     // ─────────────────────────────────────────────────────────────────
 
+    /// <summary>
+    /// densityField 를 [ReadOnly] 로 읽는 외부 Job 핸들을 등록.
+    /// 다음 ScheduleRefreshField 호출 시 dependency 로 자동 포함된다.
+    /// </summary>
+    public void RegisterReaderHandle(JobHandle handle)
+    {
+        readerHandle = JobHandle.CombineDependencies(readerHandle, handle);
+    }
+
     private void ScheduleRefreshField(JobHandle dependency = default)
     {
         CompleteRunningJob();
+
+        // 읽기 Job(MarchingCubesJob 등)이 끝난 뒤 쓰기 Job 을 시작하도록 연결
+        dependency   = JobHandle.CombineDependencies(dependency, readerHandle);
+        readerHandle = default; // 소비 후 초기화
 
         switch (profile.fieldType)
         {

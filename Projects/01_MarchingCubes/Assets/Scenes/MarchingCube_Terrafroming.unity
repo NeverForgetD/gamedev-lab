@@ -476,11 +476,19 @@ PrefabInstance:
       value: 
       objectReference: {fileID: 11400000, guid: 7d5e35e78bf11044db847fa0e0596669, type: 2}
     - target: {fileID: 5925718481885766426, guid: bf21b8622eadf1b46bbca0956ab2ffdf, type: 3}
+      propertyPath: enableLOD
+      value: 1
+      objectReference: {fileID: 0}
+    - target: {fileID: 5925718481885766426, guid: bf21b8622eadf1b46bbca0956ab2ffdf, type: 3}
       propertyPath: renderDistance
       value: 2
       objectReference: {fileID: 0}
     - target: {fileID: 5925718481885766426, guid: bf21b8622eadf1b46bbca0956ab2ffdf, type: 3}
       propertyPath: backRenderDistance
+      value: 1
+      objectReference: {fileID: 0}
+    - target: {fileID: 5925718481885766426, guid: bf21b8622eadf1b46bbca0956ab2ffdf, type: 3}
+      propertyPath: lodBands.Array.data[0].lodStep
       value: 1
       objectReference: {fileID: 0}
     - target: {fileID: 8430536555817983376, guid: bf21b8622eadf1b46bbca0956ab2ffdf, type: 3}
@@ -596,6 +604,9 @@ MonoBehaviour:
   interpolateMode: 0
   isoLevel: 0
   lodStep: 1
+  smoothShading: 1
+  enableCollider: 1
+  colliderMaxLodStep: 2
 --- !u!33 &1515931062
 MeshFilter:
   m_ObjectHideFlags: 0
