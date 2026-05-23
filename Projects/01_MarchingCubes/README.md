@@ -148,7 +148,7 @@ This pass focused on reducing per-frame CPU cost as chunk count scaled up.
 
 ### 5. 🔧 Job System, Burst & Mesh Optimization
 
-> ▶ [Job System, Burst & Mesh Optimization — Week 4](https://youtu.be/)
+> ▶ [Job System, Burst & Mesh Optimization — Week 4](https://www.youtube.com/watch?v=zn2nTJvZuBg&list=PLMOHfwfnIA6YzE3734cBiDpQrf6P25GbO&index=4)
 
 This pass ported the entire generation pipeline off the main thread and introduced vertex deduplication for smooth shading, distance-based LOD, and asynchronous collider baking.
 
@@ -268,4 +268,4 @@ Every terrain edit calls `ScheduleRefreshField`, which re-evaluates the full fBm
 | Week 1 | Marching Cubes algorithm · Sphere SDF · 2D terrain noise · Density field gizmo | [▶ Week 1](https://youtu.be/thkhvTRmsXE) |
 | Week 2 | Chunk Manager · Terrain shader · Player controller · Real-time terrain editor | [▶ Week 2](https://youtu.be/zwa8Fl17JaM) |
 | Week 3 | Object pooling · Frustum culling · ScriptableObject refactor · LOD step | [▶ Week 3](https://youtu.be/pRhWY_OiF5Y) |
-| Week 4 | Job System · Burst compilation · NativeStream · Vertex caching · Smooth shading · Async collider baking · Distance LOD | — |
+| Week 4 | Job System · Burst compilation · NativeStream · Vertex caching · Smooth shading · Async collider baking · Distance LOD | [▶ Week 4](https://www.youtube.com/watch?v=zn2nTJvZuBg&list=PLMOHfwfnIA6YzE3734cBiDpQrf6P25GbO&index=4) |
