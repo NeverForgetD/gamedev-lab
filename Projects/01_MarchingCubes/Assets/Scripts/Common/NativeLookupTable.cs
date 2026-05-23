@@ -52,8 +52,18 @@ public static class NativeLookupTable
 
     private static void Dispose()
     {
-        if (EdgeTable.IsCreated)     EdgeTable.Dispose();
-        if (TriangleTable.IsCreated) TriangleTable.Dispose();
+        // Dispose 후 = default 로 초기화해야
+        // IsCreated 가 false 를 반환해 이중 호출을 막을 수 있다.
+        if (EdgeTable.IsCreated)
+        {
+            EdgeTable.Dispose();
+            EdgeTable = default;
+        }
+        if (TriangleTable.IsCreated)
+        {
+            TriangleTable.Dispose();
+            TriangleTable = default;
+        }
     }
 
 #if UNITY_EDITOR
