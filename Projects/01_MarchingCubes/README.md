@@ -169,10 +169,10 @@ All density and mesh generation logic was moved to Unity's C# Job System with Bu
 
 | | Before | After |
 |---|---|---|
-| 실행 위치 | Main thread (블로킹) | Worker threads (비동기) |
-| 처리 방식 | 단일 스레드, managed C# | IJobParallelFor + Burst SIMD |
-| 청크 생성 시간 (resolution=16) | ~5–10 ms | ~0.3–0.8 ms |
-| 성능 향상 | — | **약 10–20×** |
+| Execution | Main thread (blocking) | Worker threads (async) |
+| Processing | Single-threaded, managed C# | IJobParallelFor + Burst SIMD |
+| Chunk build time (resolution=16) | ~5–10 ms | ~0.3–0.8 ms |
+| Throughput gain | — | **~10–20×** |
 
 **Job dependency chain**  
 To prevent data races when terrain editing fires while a mesh job is still reading the density field, `SimpleDensityField` exposes a `RegisterReaderHandle(JobHandle)` API. The generator registers its MC job handle immediately after scheduling; the next density write job automatically inherits it as a dependency via `JobHandle.CombineDependencies`.
@@ -193,12 +193,12 @@ The original pipeline emitted three independent vertices per triangle — every 
 **How vertex caching works**  
 After collecting all triangles from the `NativeStream`, each vertex position is quantized to a `int3` key (position × 10,000, rounded) and looked up in a `NativeHashMap<int3, int>`. If a matching key exists, the existing index is reused; otherwise a new vertex is inserted. This absorbs floating-point rounding differences that arise when two neighboring cells independently interpolate the same edge.
 
-| | 캐싱 없음 | 캐싱 적용 |
+| | Without Caching | With Caching |
 |---|---|---|
-| 버텍스 수 (resolution=16, ~50% fill) | ~15,000 (삼각형 수 × 3) | ~5,000–6,000 (고유 버텍스) |
-| 버텍스 버퍼 크기 | 기준 | **~65% 감소** |
-| 노멀 셰이딩 | Flat (페이스 노멀, 각진 느낌) | **Smooth (평균 노멀, 부드러운 느낌)** |
-| GPU 버텍스 처리량 | 기준 | 비례하여 감소 |
+| Vertex count (resolution=16, ~50% fill) | ~15,000 (triangles × 3) | ~5,000–6,000 (unique vertices) |
+| Vertex buffer size | baseline | **~65% smaller** |
+| Normal shading | Flat (per-face normals, faceted) | **Smooth (averaged normals)** |
+| GPU vertex throughput | baseline | reduced proportionally |
 
 A `Smooth Shading` toggle in the Inspector switches between the cached (smooth) and uncached (flat) path at runtime — useful for style comparisons or intentional low-poly aesthetics.
 
@@ -208,19 +208,19 @@ A `Smooth Shading` toggle in the Inspector switches between the cached (smooth) 
 
 The pre-existing `lodStep` parameter (which skips every N cells when marching) was wired up to a distance-aware system in `ChunkManager`. LOD bands are fully configurable in the Inspector and can be toggled on/off with a single checkbox.
 
-| 거리 (맨해튼) | LodStep | 삼각형 절감 | 설명 |
+| Distance (Manhattan) | LodStep | Triangle reduction | Description |
 |---|---|---|---|
-| ≤ 1 | 1 | — | 풀 해상도 (플레이어 주변) |
-| ≤ 3 | 2 | **75%** | 중거리 |
-| > 3 | 4 | **94%** | 원거리 |
+| ≤ 1 | 1 | — | Full resolution (player's immediate surroundings) |
+| ≤ 3 | 2 | **75%** | Mid-range |
+| > 3 | 4 | **94%** | Far distance |
 
 When the player crosses a chunk boundary, `UpdateChunkLOD` detects which chunks changed band, updates their `LodStep`, and calls `TriggerRebuild()`. This re-schedules only the MC job — no density recalculation — since the `NativeArray` data is already in place.
 
-| | LOD 없음 | LOD 적용 (renderDistance=3) |
+| | Without LOD | With LOD (renderDistance=3) |
 |---|---|---|
-| 전체 청크 수 | 49 | 49 |
-| 총 삼각형 수 | ~245,000 | ~57,000–95,000 |
-| 삼각형 절감 | — | **약 60–75%** |
+| Total chunks | 49 | 49 |
+| Total triangles | ~245,000 | ~57,000–95,000 |
+| Triangle reduction | — | **~60–75%** |
 
 ---
 
@@ -232,9 +232,9 @@ Previously, assigning `meshCollider.sharedMesh = mesh` triggered a synchronous p
 
 | | Before | After |
 |---|---|---|
-| 베이킹 실행 위치 | Main thread (블로킹) | Worker thread (비동기) |
-| Main thread 비용 | 2–5 ms / 청크 | **0 ms** |
-| 콜라이더 반영 시점 | 즉시 (같은 프레임) | 1–2 프레임 후 자동 반영 |
+| Bake execution | Main thread (blocking) | Worker thread (async) |
+| Main thread cost | 2–5 ms / chunk | **0 ms** |
+| Collider applied | Same frame (immediate) | 1–2 frames later (silent) |
 
 For distant chunks (configurable via `Collider Max Lod Step`), baking is skipped entirely — the player cannot reach them, so collision is unnecessary.
 
