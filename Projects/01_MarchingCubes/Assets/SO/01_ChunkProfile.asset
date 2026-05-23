@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: 01_ChunkProfile
   m_EditorClassIdentifier: Assembly-CSharp::ChunkProfile
   fieldType: 1
-  resolution: 16
+  resolution: 32
   worldSize: 16
   terrain_baseHeight: 5
   terrainNoise:
