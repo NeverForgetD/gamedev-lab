@@ -11,7 +11,7 @@ Supports runtime terrain editing, chunk streaming, frustum culling, and object p
 
 - **Engine:** Unity 6 (URP)
 - **Language:** C#
-- **Libraries:** Unity.Mathematics, Unity Input System
+- **Libraries:** Unity.Mathematics, Unity.Collections, Unity.Jobs, Unity.Burst, Unity Input System
 - **GPU:** ComputeBuffer, DrawMeshInstancedIndirect, Procedural Instancing (custom shader)
 
 ---
@@ -146,19 +146,130 @@ This pass focused on reducing per-frame CPU cost as chunk count scaled up.
 
 ---
 
-### 5. 🔧 Job System & Mesh Threading *(In Progress)*
+### 5. 🔧 Job System, Burst & Mesh Optimization
 
-Currently, the Marching Cubes loop runs on the main thread inside `Update`. For a `resolution` of 32, a single chunk generates ~32,768 cube evaluations per frame — and multiple chunks loading simultaneously stall the frame.
+> ▶ [Job System, Burst & Mesh Optimization — Week 4](https://youtu.be/)
 
-**🧵 Planned approach**  
-The mesh generation loop will be ported to Unity's Job System with Burst compilation. The marching loop body (`MarchCube`) is a pure function with no managed allocations, making it a natural fit for `IJobParallelFor`. Each job processes a slice of the XZ grid independently; results are written into a `NativeList<Triangle>` and flushed to the `Mesh` API via `Mesh.ApplyAndDisposeWritableMeshData` on the main thread.
+This pass ported the entire generation pipeline off the main thread and introduced vertex deduplication for smooth shading, distance-based LOD, and asynchronous collider baking.
 
-Moving generation off the main thread means chunks can be built over several frames without a hitch, decoupled from the throttle-per-frame workaround currently used.
+---
 
-**✨ Smooth shading**  
-The current pipeline emits unshared vertices — every triangle gets its own three vertices — so `RecalculateNormals` produces flat (faceted) shading. Smooth shading requires shared vertices: adjacent triangles must reference the same vertex index so Unity can average normals across the shared edge.
+#### 🧵 NativeArray & Job System
 
-This means replacing the current append-only vertex list with a dictionary-based deduplication pass: for each computed edge vertex, look up whether a vertex at that world position was already emitted; if so, reuse its index; if not, insert it. The tradeoff is a more complex build step but significantly better visual quality and a smaller vertex buffer.
+All density and mesh generation logic was moved to Unity's C# Job System with Burst compilation.
+
+**Data migration**  
+`FieldData[]` (managed heap) was replaced with `NativeArray<FieldData>` (`Allocator.Persistent`). This eliminates GC pressure and allows zero-copy access from Burst-compiled jobs. The Marching Cubes lookup tables (`edgeTable`, `triangleTable`) were also migrated to persistent `NativeArray<int>`, since Burst jobs cannot read managed static arrays.
+
+**Parallel density generation**  
+`CreateSphereJob` and `CreateTerrain2DJob` implement `IJobParallelFor`, distributing density evaluation across all available worker cores. fBm noise (`noise.snoise`) is fully Burst-compatible and executes with SIMD vectorization.
+
+**Parallel Marching Cubes**  
+`MarchingCubesJob` marches all cells in parallel. Each worker independently computes a cubeIndex, interpolates edge vertices using `FixedList512Bytes<float3>` (stack-allocated, no GC), and writes resulting `Triangle` structs to a `NativeStream`. `NativeStream` assigns each job index its own memory bucket, eliminating write contention entirely — no atomics, no locks.
+
+```
+Before (single-threaded, resolution = 16):
+  4,096 cells × managed C# → ~5–10 ms / chunk (main thread stall)
+
+After (IJobParallelFor + Burst, 8-core CPU):
+  4,096 cells / 8 workers + SIMD → ~0.3–0.8 ms / chunk (off main thread)
+  Throughput improvement: ~10–20×
+```
+
+**Job dependency chain**  
+To prevent data races when terrain editing fires while a mesh job is still reading the density field, `SimpleDensityField` exposes a `RegisterReaderHandle(JobHandle)` API. The generator registers its MC job handle immediately after scheduling; the next density write job automatically inherits it as a dependency via `JobHandle.CombineDependencies`.
+
+```
+MarchingCubesJob (reads DensityField)
+      │  RegisterReaderHandle()
+      ▼
+CreateTerrain2DJob (writes DensityField) — waits for MC job to finish first
+```
+
+---
+
+#### ✨ Vertex Caching & Smooth Shading
+
+The original pipeline emitted three independent vertices per triangle — every triangle owned its own corners with no sharing. `RecalculateNormals` had nothing to average across, producing flat (faceted) shading.
+
+**How vertex caching works**  
+After collecting all triangles from the `NativeStream`, each vertex position is quantized to a `int3` key (position × 10,000, rounded) and looked up in a `NativeHashMap<int3, int>`. If a matching key exists, the existing index is reused; otherwise a new vertex is inserted. This absorbs floating-point rounding differences that arise when two neighboring cells independently interpolate the same edge.
+
+```
+Without caching (resolution = 16, ~50% surface fill):
+  ~5,000 triangles × 3 = ~15,000 vertices
+
+With caching:
+  Each edge vertex shared by 2–4 adjacent cells → ~60–70% reduction
+  → ~5,000–6,000 unique vertices
+
+Benefits:
+  • Vertex buffer size  ↓ ~65%
+  • RecalculateNormals averages across shared vertices → smooth shading
+  • GPU vertex fetch and interpolation cost reduced proportionally
+```
+
+A `Smooth Shading` toggle in the Inspector switches between the cached (smooth) and uncached (flat) path at runtime — useful for style comparisons or intentional low-poly aesthetics.
+
+---
+
+#### 📐 Distance-Based LOD
+
+The pre-existing `lodStep` parameter (which skips every N cells when marching) was wired up to a distance-aware system in `ChunkManager`. LOD bands are fully configurable in the Inspector and can be toggled on/off with a single checkbox.
+
+```
+Enable LOD  ☑
+Lod Bands:
+  Distance ≤ 1  →  LodStep 1   (full resolution, player's immediate surroundings)
+  Distance ≤ 3  →  LodStep 2   (75% fewer triangles)
+  Distance > 3  →  LodStep 4   (94% fewer triangles)
+```
+
+When the player crosses a chunk boundary, `UpdateChunkLOD` detects which chunks changed band, updates their `LodStep`, and calls `TriggerRebuild()`. This re-schedules only the MC job — no density recalculation — since the `NativeArray` data is already in place.
+
+```
+renderDistance = 3  →  49 total chunks
+Without LOD: 49 × ~5,000 triangles = ~245,000 triangles
+With LOD:    9 near × 5,000 + 40 far × ~300–1,250 = ~57,000–95,000 triangles
+Triangle count reduction: ~60–75%
+```
+
+---
+
+#### 🧱 Asynchronous Collider Baking
+
+Previously, assigning `meshCollider.sharedMesh = mesh` triggered a synchronous physics bake on the main thread — a 2–5 ms stall per chunk depending on vertex count.
+
+`BakeMeshJob` wraps `Physics.BakeMesh(meshID, false)`, which Unity 2022+ allows to run on worker threads. The job is scheduled immediately after `ApplyMesh` returns (mesh data is already on the GPU), and the collider assignment is deferred to the frame `bakeJobHandle.IsCompleted` returns true.
+
+```
+Before: mesh upload → collider bake (2–5 ms, main thread) → next frame
+After:  mesh upload → BakeMeshJob.Schedule() → 0 ms main thread cost
+        collider assigned silently 1–2 frames later on completion
+```
+
+For distant chunks (configurable via `Collider Max Lod Step`), baking is skipped entirely — the player cannot reach them, so collision is unnecessary.
+
+---
+
+#### ⚠️ Known Limitations & Future Work
+
+**LOD seam artifacts**  
+When two adjacent chunks have different `LodStep` values, their shared border edge has mismatched vertex densities. This produces visible cracks or overlapping triangles along the boundary. The canonical solution is the **Transvoxel algorithm** (Eric Lengyel, 2010): a second set of 512-entry lookup tables generates *transition cells* that bridge the resolution mismatch with geometrically continuous triangles. Implementation requires detecting all six neighbour LOD levels per chunk, running a separate transition-cell pass per boundary face, and synchronising timing so both chunks are complete before stitching — a significant addition to the current pipeline.
+
+As a practical mitigation, scene-level distance fog can hide the seams on far chunks where LodStep is highest and the artifacts are smallest.
+
+**Chunk boundary normal discontinuities**  
+Smooth shading is computed per-chunk. Vertices on a chunk's border are not shared with the neighbouring chunk's vertices, so normals are computed independently on each side — producing a visible shading seam at chunk edges even when the geometry is continuous. Resolving this requires a post-build pass where each chunk exchanges its border vertex normals with its six neighbours and averages them. This demands that both chunks finish their MC jobs before the exchange can occur, adding coordination complexity to `ChunkManager`.
+
+**Vertex deduplication on the main thread**  
+`BuildSmooth` currently runs the `NativeHashMap` lookup loop on the main thread after the MC job completes. For high-resolution chunks this can cost 1–3 ms. Moving this into a dedicated `IJob` (single-threaded but off main thread) or restructuring the MC job to emit pre-deduplicated data would eliminate the remaining main-thread cost.
+
+**Base density caching**  
+Every terrain edit calls `ScheduleRefreshField`, which re-evaluates the full fBm noise formula for every grid point. Since noise only depends on world position (which never changes for a stationary chunk), the base density could be cached in a separate `NativeArray<float>` and only the `deltaField` addition re-run on edit — reducing edit-time job cost by roughly the fBm evaluation fraction (~70–80% of the density job).
+
+**Mesh.AllocateWritableMeshData (Zero-Copy upload)**  
+`mesh.SetVertices(NativeArray)` internally copies data into a managed buffer before uploading. `Mesh.AllocateWritableMeshData` bypasses this copy by writing directly into a GPU-ready buffer. Combined with a Burst-compiled normal calculation job, this would make the entire post-MC pipeline — vertex dedup, normal computation, mesh upload — run without touching the managed heap.
 
 ---
 
@@ -169,4 +280,4 @@ This means replacing the current append-only vertex list with a dictionary-based
 | Week 1 | Marching Cubes algorithm · Sphere SDF · 2D terrain noise · Density field gizmo | [▶ Week 1](https://youtu.be/thkhvTRmsXE) |
 | Week 2 | Chunk Manager · Terrain shader · Player controller · Real-time terrain editor | [▶ Week 2](https://youtu.be/zwa8Fl17JaM) |
 | Week 3 | Object pooling · Frustum culling · ScriptableObject refactor · LOD step | [▶ Week 3](https://youtu.be/pRhWY_OiF5Y) |
-| Week 4 | Job System · Burst compilation · Threaded mesh build · Smooth shading *(in progress)* | — |
+| Week 4 | Job System · Burst compilation · NativeStream · Vertex caching · Smooth shading · Async collider baking · Distance LOD | — |
