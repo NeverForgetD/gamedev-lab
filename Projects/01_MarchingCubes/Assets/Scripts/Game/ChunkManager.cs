@@ -1,3 +1,8 @@
+// ChunkManager.cs
+// 변경점 : entry.field.InitField() (동기) → ScheduleInit() (비동기)
+// densityField Job 완료는 SimpleDensityField.Update() 가 감지하고
+// IsDirty = true 를 세팅 → Generator 가 MC Job 을 이어서 예약한다.
+
 using System.Collections.Generic;
 using UnityEngine;
 
@@ -106,7 +111,14 @@ public class ChunkManager : MonoBehaviour
             generateQueue.RemoveAt(0);
 
             if (activeChunks.TryGetValue(coord, out var entry))
+            {
+                // ─── 변경점 ───────────────────────────────────────────
+                // 기존 : entry.field.InitField()  ← main thread 블로킹
+                // 변경 : InitField() 내부에서 Job 을 예약만 하고 즉시 반환
+                //        완료는 SimpleDensityField.Update() 가 감지함
                 entry.field.InitField();
+                // ─────────────────────────────────────────────────────
+            }
 
             count++;
         }

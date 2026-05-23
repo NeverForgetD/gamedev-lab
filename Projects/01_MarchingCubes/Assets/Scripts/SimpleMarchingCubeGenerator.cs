@@ -1,4 +1,12 @@
-using System.Collections.Generic;
+// SimpleMarchingCubeGenerator.cs
+// 기존 main-thread 3중 루프를 제거하고 MarchingCubesJob(IJobParallelFor) 으로 교체.
+//
+// 흐름
+//   Update() → densityField Job 완료 감지 → ScheduleGeneration()
+//   LateUpdate() → MC Job 완료 감지 → BuildMesh() (main thread 메시 업로드)
+
+using Unity.Collections;
+using Unity.Jobs;
 using Unity.Mathematics;
 using UnityEngine;
 
@@ -22,17 +30,13 @@ public class SimpleMarchingCubeGenerator : MonoBehaviour
     private MeshCollider meshCollider;
     private Mesh         mesh;
 
-    private int[] cubeCorners = new int[8];
-    private List<Vector3> vertices        = new();
-    private List<int>     triangleIndices = new();
+    // ── Job 상태 ──────────────────────────────────────────────────────
+    private JobHandle    mcJobHandle;
+    private NativeStream triangleStream;   // TempJob, Execute 후 Dispose
+    private int          totalCellCount;
+    private bool         isMcJobRunning;
 
-    private (int first, int second)[] edgeList =
-    {
-        (0, 1), (1, 2), (2, 3), (3, 0),
-        (4, 5), (5, 6), (6, 7), (7, 4),
-        (0, 4), (1, 5), (2, 6), (3, 7)
-    };
-
+    // ─────────────────────────────────────────────────────────────────
     private void Start()
     {
         meshFilter   = GetComponent<MeshFilter>();
@@ -40,128 +44,135 @@ public class SimpleMarchingCubeGenerator : MonoBehaviour
         meshCollider = GetComponent<MeshCollider>();
         if (meshCollider == null)
             meshCollider = gameObject.AddComponent<MeshCollider>();
-        mesh = new Mesh();
+        mesh = new Mesh { name = "MarchingCubesMesh" };
     }
 
     private void Update()
     {
-        if (densityField.IsDirty)
+        // densityField Job 이 완료되면 MC Job 예약
+        if (densityField.IsDirty && !densityField.IsFieldJobRunning && !isMcJobRunning)
         {
-            GenerateMesh();
             densityField.ClearDirty();
+            ScheduleGeneration();
+        }
+    }
+
+    private void LateUpdate()
+    {
+        // MC Job 완료 후 메시 업로드 (main thread)
+        if (isMcJobRunning && mcJobHandle.IsCompleted)
+        {
+            mcJobHandle.Complete();
+            isMcJobRunning = false;
+            BuildMesh();
         }
     }
 
     private void OnDisable()
     {
+        CompleteMcJob();
         if (meshCollider != null) meshCollider.sharedMesh = null;
         mesh?.Clear();
     }
 
-    private void GenerateMesh()
+    private void OnDestroy()
     {
-        var fieldBuffer   = densityField.DensityField;
-        var resolution    = densityField.Resolution;   // 큐브 수
-        var pointsPerAxis = resolution + 1;            // 점 수
-        var origin        = (Unity.Mathematics.float3)transform.position;
+        CompleteMcJob();
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    // Job 예약
+    // ─────────────────────────────────────────────────────────────────
+    private void ScheduleGeneration()
+    {
+        var resolution    = densityField.Resolution;
         var step          = Mathf.Max(1, lodStep);
+        int cellsPerAxis  = (resolution + step - 1) / step;
+        totalCellCount    = cellsPerAxis * cellsPerAxis * cellsPerAxis;
 
-        vertices.Clear();
-        triangleIndices.Clear();
+        // NativeStream : 셀마다 독립 버킷 → 가변 Triangle 출력
+        triangleStream = new NativeStream(totalCellCount, Allocator.TempJob);
 
-        for (var x = 0; x < resolution; x += step)
-        for (var y = 0; y < resolution; y += step)
-        for (var z = 0; z < resolution; z += step)
+        var job = new MarchingCubesJob
         {
-            foreach (var triangle in MarchCube(new int3(x, y, z), pointsPerAxis, fieldBuffer, step))
+            DensityField    = densityField.DensityFieldNative,
+            EdgeTable       = NativeLookupTable.EdgeTable,
+            TriangleTable   = NativeLookupTable.TriangleTable,
+            Resolution      = resolution,
+            PointsPerAxis   = resolution + 1,
+            IsoLevel        = isoLevel,
+            LodStep         = step,
+            InterpolateMode = (int)interpolateMode,
+            Writer          = triangleStream.AsWriter()
+        };
+
+        // batchSize : 셀 수에 따라 동적 조정
+        int batch  = Mathf.Max(8, totalCellCount / (SystemInfo.processorCount * 4));
+        mcJobHandle    = job.Schedule(totalCellCount, batch);
+        isMcJobRunning = true;
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    // 메시 업로드 (main thread, Job 완료 후)
+    // ─────────────────────────────────────────────────────────────────
+    private void BuildMesh()
+    {
+        // ① NativeStream → Triangle 수집
+        var reader = triangleStream.AsReader();
+
+        // 최대 트라이앵글 수 추정 : 셀당 최대 5개
+        int estimatedMax = totalCellCount * 5;
+        var vertices        = new NativeList<Vector3>(estimatedMax * 3, Allocator.Temp);
+        var triangleIndices = new NativeList<int>(estimatedMax * 3, Allocator.Temp);
+
+        var origin = (Unity.Mathematics.float3)transform.position;
+
+        for (int i = 0; i < totalCellCount; i++)
+        {
+            int count = reader.BeginForEachIndex(i);
+            for (int t = 0; t < count; t++)
             {
-                var i = vertices.Count;
-                vertices.Add((Vector3)(triangle.a - origin));
-                vertices.Add((Vector3)(triangle.b - origin));
-                vertices.Add((Vector3)(triangle.c - origin));
-                triangleIndices.Add(i);
-                triangleIndices.Add(i + 1);
-                triangleIndices.Add(i + 2);
+                var tri = reader.Read<Triangle>();
+                int idx = vertices.Length;
+
+                vertices.Add((Vector3)(tri.a - origin));
+                vertices.Add((Vector3)(tri.b - origin));
+                vertices.Add((Vector3)(tri.c - origin));
+
+                triangleIndices.Add(idx);
+                triangleIndices.Add(idx + 1);
+                triangleIndices.Add(idx + 2);
             }
+            reader.EndForEachIndex();
         }
 
+        triangleStream.Dispose();
+
+        // ② Mesh 적용
         mesh.Clear();
-        mesh.SetVertices(vertices);
-        mesh.SetTriangles(triangleIndices, 0);
+        mesh.SetVertices(vertices.AsArray());
+        mesh.SetTriangles(triangleIndices.AsArray().ToArray(), 0); // int[] 필요
         mesh.RecalculateNormals();
         mesh.RecalculateBounds();
 
         meshFilter.mesh = mesh;
 
+        // ③ Collider 갱신
         meshCollider.sharedMesh = null;
         meshCollider.sharedMesh = mesh;
+
+        vertices.Dispose();
+        triangleIndices.Dispose();
     }
 
-    private List<Triangle> MarchCube(int3 p, int pts, FieldData[] fieldBuffer, int step)
+    // ─────────────────────────────────────────────────────────────────
+    // 안전 종료
+    // ─────────────────────────────────────────────────────────────────
+    private void CompleteMcJob()
     {
-        cubeCorners[0] = Utils.Flatten(new int3(p.x,        p.y,        p.z       ), pts);
-        cubeCorners[1] = Utils.Flatten(new int3(p.x + step, p.y,        p.z       ), pts);
-        cubeCorners[2] = Utils.Flatten(new int3(p.x + step, p.y,        p.z + step), pts);
-        cubeCorners[3] = Utils.Flatten(new int3(p.x,        p.y,        p.z + step), pts);
-        cubeCorners[4] = Utils.Flatten(new int3(p.x,        p.y + step, p.z       ), pts);
-        cubeCorners[5] = Utils.Flatten(new int3(p.x + step, p.y + step, p.z       ), pts);
-        cubeCorners[6] = Utils.Flatten(new int3(p.x + step, p.y + step, p.z + step), pts);
-        cubeCorners[7] = Utils.Flatten(new int3(p.x,        p.y + step, p.z + step), pts);
-
-        var cubeIndex = 0;
-        for (var i = 0; i < 8; i++)
-        {
-            if (fieldBuffer[cubeCorners[i]].density < isoLevel)
-                cubeIndex |= (1 << i);
-        }
-
-        var vertList = new float3[12];
-        for (var i = 0; i < 12; i++)
-        {
-            if ((LookupTable.edgeTable[cubeIndex] & (1 << i)) == 0) continue;
-
-            var p1 = fieldBuffer[cubeCorners[edgeList[i].first]].position;
-            var p2 = fieldBuffer[cubeCorners[edgeList[i].second]].position;
-            var v1 = fieldBuffer[cubeCorners[edgeList[i].first]].density;
-            var v2 = fieldBuffer[cubeCorners[edgeList[i].second]].density;
-            vertList[i] = Interpolate(p1, p2, v1, v2);
-        }
-
-        var triangleList = new List<Triangle>();
-        for (int i = 0; LookupTable.triangleTable[cubeIndex, i] != -1; i += 3)
-        {
-            triangleList.Add(new Triangle
-            {
-                a = vertList[LookupTable.triangleTable[cubeIndex, i    ]],
-                b = vertList[LookupTable.triangleTable[cubeIndex, i + 1]],
-                c = vertList[LookupTable.triangleTable[cubeIndex, i + 2]]
-            });
-        }
-
-        return triangleList;
-    }
-
-    private float3 Interpolate(float3 p1, float3 p2, float v1, float v2)
-    {
-        var t = interpolateMode switch
-        {
-            InterpolateMode.Linear     => Linear(v1, v2),
-            InterpolateMode.Half       => 0.5f,
-            InterpolateMode.Smoothstep => Smoothstep(v1, v2),
-            InterpolateMode.Snapping   => Snapping(v1, v2),
-            _                          => Linear(v1, v2)
-        };
-        return p1 + t * (p2 - p1);
-    }
-
-    private float Linear(float v1, float v2)    => (isoLevel - v1) / (v2 - v1);
-    private float Half()                         => 0.5f;
-    private float Smoothstep(float v1, float v2) { var t = Linear(v1, v2); return t * t * (3f - 2f * t); }
-    private float Snapping(float v1, float v2, float snap = 0.2f)
-    {
-        var t = Linear(v1, v2);
-        if (t < snap) return 0f;
-        if (t > 1f - snap) return 1f;
-        return t;
+        if (!isMcJobRunning) return;
+        mcJobHandle.Complete();
+        isMcJobRunning = false;
+        if (triangleStream.IsCreated) triangleStream.Dispose();
     }
 }

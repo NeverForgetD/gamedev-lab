@@ -1,11 +1,12 @@
-using System;
+using Unity.Collections;
+using Unity.Jobs;
 using Unity.Mathematics;
 using UnityEngine;
 
 public struct FieldData
 {
     public float3 position;
-    public float density;
+    public float  density;
 }
 
 [System.Serializable]
@@ -19,11 +20,7 @@ public struct NoiseSettings
 public class SimpleDensityField : MonoBehaviour
 {
     private static readonly int GizmoBufferProperty = Shader.PropertyToID("_GizmoBuffer");
-    private const int STRIDE = 16;
-
-    private const int   NOISE_OCTAVES    = 4;
-    private const float NOISE_LACUNARITY = 2f;
-    private const float NOISE_GAIN       = 0.5f;
+    private const int STRIDE = 16; // sizeof(FieldData) : float3(12) + float(4)
 
     public enum FieldType { Sphere, Terrain2D }
 
@@ -38,44 +35,62 @@ public class SimpleDensityField : MonoBehaviour
     private ComputeBuffer gizmoBuffer;
     private ComputeBuffer argsBuffer;
 
-    private FieldData[] densityField;
-    private float[]     deltaField;
+    // ── NativeArray (Persistent) ──────────────────────────────────────
+    private NativeArray<FieldData> densityField;
+    private NativeArray<float>     deltaField;
 
-    public bool IsDirty { get; private set; }
+    // ── 진행 중인 Job 핸들 ────────────────────────────────────────────
+    private JobHandle pendingFieldHandle;
+    private bool      isFieldJobRunning;
 
-    public ChunkProfile Profile
-    {
-        get => profile;
-        set => profile = value;
-    }
+    public bool IsDirty           { get; private set; }
+    public bool IsFieldJobRunning => isFieldJobRunning;
 
-    public FieldData[] DensityField => densityField;
-    public int         Resolution   => profile.resolution;
-    public float       UnitSize     => profile.UnitSize;
-    public float       WorldSize    => profile.WorldSize;
+    // Generator 가 Job 완료 후 읽어가는 NativeArray (ReadOnly)
+    public NativeArray<FieldData> DensityFieldNative => densityField;
 
+    public ChunkProfile Profile  { get => profile; set => profile = value; }
+    public int          Resolution => profile.resolution;
+    public float        UnitSize   => profile.UnitSize;
+    public float        WorldSize  => profile.WorldSize;
+
+    // ─────────────────────────────────────────────────────────────────
     void Start()
     {
-        InitField();
+        AllocateNativeArrays();
         InitGizmo();
+        ScheduleRefreshField();
     }
 
     private void Update()
     {
+        // Job 완료 체크
+        if (isFieldJobRunning && pendingFieldHandle.IsCompleted)
+        {
+            pendingFieldHandle.Complete();
+            isFieldJobRunning = false;
+
+            if (showGizmos && gizmoBuffer != null)
+                UploadToGizmoBuffer();
+
+            IsDirty = true;
+        }
+
         if (showGizmos && gizmoBuffer != null && gizmoMaterial != null)
-            Graphics.DrawMeshInstancedIndirect(gizmoMesh, 0, gizmoMaterial, bounds, argsBuffer);
+            Graphics.DrawMeshInstancedIndirect(
+                gizmoMesh, 0, gizmoMaterial, bounds, argsBuffer);
     }
 
+    // ─────────────────────────────────────────────────────────────────
+    // 공개 API
+    // ─────────────────────────────────────────────────────────────────
+
+    /// <summary>NativeArray 재할당 + 필드 리프레시 예약 (ChunkManager 호출)</summary>
     public void InitField()
     {
-        if (profile == null) { Debug.LogError("ChunkProfile not assigned", this); return; }
-
-        int pts   = profile.resolution + 1;
-        int count = pts * pts * pts;
-        densityField = new FieldData[count];
-        deltaField   = new float[count];
-        RefreshField();
-        IsDirty = true;
+        CompleteRunningJob();          // 진행 중이면 즉시 완료
+        AllocateNativeArrays();
+        ScheduleRefreshField();
     }
 
     public void ClearDirty() => IsDirty = false;
@@ -83,114 +98,131 @@ public class SimpleDensityField : MonoBehaviour
 
     public void ResetField()
     {
-        if (deltaField != null)
-            Array.Clear(deltaField, 0, deltaField.Length);
+        CompleteRunningJob();
+        if (deltaField.IsCreated)
+            for (int i = 0; i < deltaField.Length; i++) deltaField[i] = 0f;
         IsDirty = false;
     }
 
-    private void RefreshField()
+    /// <summary>지형 편집 : ModifyDensityJob → RefreshField Job 체인</summary>
+    public void ModifyDensity(float3 center, float radius, float delta)
     {
+        CompleteRunningJob();
+
+        var modJob = new ModifyDensityJob
+        {
+            DensityField = densityField,
+            DeltaField   = deltaField,
+            Center       = center,
+            Radius       = radius,
+            Delta        = delta
+        };
+
+        // ModifyDensity → RefreshField 순서로 체인
+        var modHandle = modJob.Schedule(densityField.Length, 64);
+        ScheduleRefreshField(modHandle);
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    // 내부 : Job 스케줄링
+    // ─────────────────────────────────────────────────────────────────
+
+    private void ScheduleRefreshField(JobHandle dependency = default)
+    {
+        CompleteRunningJob();
+
         switch (profile.fieldType)
         {
-            case FieldType.Sphere:    CreateSphere(transform.position);    break;
-            case FieldType.Terrain2D: CreateTerrain2D(transform.position); break;
+            case FieldType.Sphere:    ScheduleSphere(dependency);    break;
+            case FieldType.Terrain2D: ScheduleTerrain2D(dependency); break;
         }
     }
 
-    private float3 GetCenter() => profile.fieldType switch
+    private void ScheduleSphere(JobHandle dependency)
+    {
+        var center = GetFieldCenter();
+        var job    = new CreateSphereJob
+        {
+            DeltaField      = deltaField,
+            DensityField    = densityField,
+            PointsPerAxis   = profile.resolution + 1,
+            CenterPos       = (float3)transform.position,
+            FieldCenter     = center,
+            UnitSize        = profile.UnitSize,
+            SphereRadius    = profile.sphereRadius,
+            ApplyNoise      = profile.sphereNoise.applyNoise,
+            NoiseFrequency  = profile.sphereNoise.frequency,
+            NoiseAmplitude  = profile.sphereNoise.amplitude
+        };
+
+        pendingFieldHandle = job.Schedule(densityField.Length, 64, dependency);
+        isFieldJobRunning  = true;
+    }
+
+    private void ScheduleTerrain2D(JobHandle dependency)
+    {
+        var center = GetFieldCenter();
+        var job    = new CreateTerrain2DJob
+        {
+            DeltaField      = deltaField,
+            DensityField    = densityField,
+            PointsPerAxis   = profile.resolution + 1,
+            OriginPos       = (float3)transform.position,
+            FieldCenter     = center,
+            UnitSize        = profile.UnitSize,
+            BaseHeight      = profile.terrain_baseHeight,
+            ApplyNoise      = profile.terrainNoise.applyNoise,
+            NoiseFrequency  = profile.terrainNoise.frequency,
+            NoiseAmplitude  = profile.terrainNoise.amplitude
+        };
+
+        pendingFieldHandle = job.Schedule(densityField.Length, 64, dependency);
+        isFieldJobRunning  = true;
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    // 내부 유틸
+    // ─────────────────────────────────────────────────────────────────
+
+    private float3 GetFieldCenter() => profile.fieldType switch
     {
         FieldType.Sphere    => new float3(1, 1, 1) * profile.resolution / 2f,
         FieldType.Terrain2D => new float3(profile.resolution / 2f, 0f, profile.resolution / 2f),
         _                   => new float3(1, 1, 1) * profile.resolution / 2f
     };
 
-    // ── Sphere ────────────────────────────────────────────────────
-    private void CreateSphere(float3 centerPos)
+    private void AllocateNativeArrays()
     {
-        int pts    = profile.resolution + 1;
-        var center = GetCenter();
-        for (var i = 0; i < densityField.Length; i++)
-        {
-            var x   = i % pts;
-            var y   = (i / pts) % pts;
-            var z   = i / (pts * pts);
-            var pos = (new float3(x, y, z) - center) * profile.UnitSize + centerPos;
+        if (profile == null) { Debug.LogError("ChunkProfile not assigned", this); return; }
 
-            float density = math.distance(pos, centerPos) - profile.sphereRadius;
-            if (profile.sphereNoise.applyNoise)
-                density += FBm3D(pos, profile.sphereNoise.frequency) * profile.sphereNoise.amplitude;
+        int pts   = profile.resolution + 1;
+        int count = pts * pts * pts;
 
-            densityField[i] = new FieldData { position = pos, density = density + deltaField[i] };
-        }
+        // 이미 있으면 Dispose 후 재할당
+        if (densityField.IsCreated) densityField.Dispose();
+        if (deltaField.IsCreated)   deltaField.Dispose();
+
+        densityField = new NativeArray<FieldData>(count, Allocator.Persistent);
+        deltaField   = new NativeArray<float>(count, Allocator.Persistent);
     }
 
-    // ── Terrain2D ─────────────────────────────────────────────────
-    private void CreateTerrain2D(float3 originPos)
+    private void CompleteRunningJob()
     {
-        int pts    = profile.resolution + 1;
-        var center = GetCenter();
-        for (var i = 0; i < densityField.Length; i++)
-        {
-            var x   = i % pts;
-            var y   = (i / pts) % pts;
-            var z   = i / (pts * pts);
-            var pos = (new float3(x, y, z) - center) * profile.UnitSize + originPos;
-
-            float density = pos.y - profile.terrain_baseHeight;
-            if (profile.terrainNoise.applyNoise)
-                density -= FBm2D(new float2(pos.x, pos.z), profile.terrainNoise.frequency) * profile.terrainNoise.amplitude;
-
-            densityField[i] = new FieldData { position = pos, density = density + deltaField[i] };
-        }
+        if (!isFieldJobRunning) return;
+        pendingFieldHandle.Complete();
+        isFieldJobRunning = false;
     }
 
-    // ── fBm ──────────────────────────────────────────────────────
-    private float FBm2D(float2 p, float frequency)
+    private void UploadToGizmoBuffer()
     {
-        float value = 0f, amp = 1f, freq = frequency, norm = 0f;
-        for (int i = 0; i < NOISE_OCTAVES; i++)
-        {
-            value += noise.snoise(p * freq) * amp;
-            norm  += amp;
-            freq  *= NOISE_LACUNARITY;
-            amp   *= NOISE_GAIN;
-        }
-        return value / norm;
+        // NativeArray → ComputeBuffer
+        // Unity 2022+: SetData(NativeArray) 직접 지원
+        gizmoBuffer.SetData(densityField);
     }
 
-    private float FBm3D(float3 p, float frequency)
-    {
-        float value = 0f, amp = 1f, freq = frequency, norm = 0f;
-        for (int i = 0; i < NOISE_OCTAVES; i++)
-        {
-            value += noise.snoise(p * freq) * amp;
-            norm  += amp;
-            freq  *= NOISE_LACUNARITY;
-            amp   *= NOISE_GAIN;
-        }
-        return value / norm;
-    }
-
-    // ── Terrain Edit ──────────────────────────────────────────────
-    public void ModifyDensity(float3 center, float radius, float delta)
-    {
-        float radiusSq = radius * radius;
-
-        for (int i = 0; i < densityField.Length; i++)
-        {
-            float distSq = math.distancesq(densityField[i].position, center);
-            if (distSq >= radiusSq) continue;
-
-            float t = 1f - math.sqrt(distSq) / radius;
-            deltaField[i] += delta * t * t;
-        }
-
-        RefreshField();
-        if (gizmoBuffer != null) gizmoBuffer.SetData(densityField);
-        IsDirty = true;
-    }
-
-    // ── Gizmo ─────────────────────────────────────────────────────
+    // ─────────────────────────────────────────────────────────────────
+    // Gizmo
+    // ─────────────────────────────────────────────────────────────────
     private void InitGizmo()
     {
         if (gizmoMaterial == null || gizmoMesh == null) return;
@@ -201,25 +233,33 @@ public class SimpleDensityField : MonoBehaviour
         bounds = new Bounds(transform.position, new Vector3(size, size, size));
 
         gizmoBuffer = new ComputeBuffer(count, STRIDE);
-        gizmoBuffer.SetData(densityField);
 
         gizmoMaterial = new Material(gizmoMaterial);
         gizmoMaterial.enableInstancing = true;
         gizmoMaterial.SetBuffer(GizmoBufferProperty, gizmoBuffer);
 
-        uint[] args = {
+        uint[] args =
+        {
             gizmoMesh.GetIndexCount(0),
             (uint)count,
             gizmoMesh.GetIndexStart(0),
             gizmoMesh.GetBaseVertex(0),
             0
         };
-        argsBuffer = new ComputeBuffer(1, args.Length * sizeof(uint), ComputeBufferType.IndirectArguments);
+        argsBuffer = new ComputeBuffer(
+            1, args.Length * sizeof(uint), ComputeBufferType.IndirectArguments);
         argsBuffer.SetData(args);
     }
 
+    // ─────────────────────────────────────────────────────────────────
+    // 생명주기
+    // ─────────────────────────────────────────────────────────────────
     private void OnDestroy()
     {
+        CompleteRunningJob();
+        if (densityField.IsCreated) densityField.Dispose();
+        if (deltaField.IsCreated)   deltaField.Dispose();
+
         gizmoBuffer?.Dispose();
         argsBuffer?.Dispose();
         if (gizmoMaterial != null) Destroy(gizmoMaterial);
