@@ -167,14 +167,12 @@ All density and mesh generation logic was moved to Unity's C# Job System with Bu
 **Parallel Marching Cubes**  
 `MarchingCubesJob` marches all cells in parallel. Each worker independently computes a cubeIndex, interpolates edge vertices using `FixedList512Bytes<float3>` (stack-allocated, no GC), and writes resulting `Triangle` structs to a `NativeStream`. `NativeStream` assigns each job index its own memory bucket, eliminating write contention entirely — no atomics, no locks.
 
-```
-Before (single-threaded, resolution = 16):
-  4,096 cells × managed C# → ~5–10 ms / chunk (main thread stall)
-
-After (IJobParallelFor + Burst, 8-core CPU):
-  4,096 cells / 8 workers + SIMD → ~0.3–0.8 ms / chunk (off main thread)
-  Throughput improvement: ~10–20×
-```
+| | Before | After |
+|---|---|---|
+| 실행 위치 | Main thread (블로킹) | Worker threads (비동기) |
+| 처리 방식 | 단일 스레드, managed C# | IJobParallelFor + Burst SIMD |
+| 청크 생성 시간 (resolution=16) | ~5–10 ms | ~0.3–0.8 ms |
+| 성능 향상 | — | **약 10–20×** |
 
 **Job dependency chain**  
 To prevent data races when terrain editing fires while a mesh job is still reading the density field, `SimpleDensityField` exposes a `RegisterReaderHandle(JobHandle)` API. The generator registers its MC job handle immediately after scheduling; the next density write job automatically inherits it as a dependency via `JobHandle.CombineDependencies`.
@@ -195,19 +193,12 @@ The original pipeline emitted three independent vertices per triangle — every 
 **How vertex caching works**  
 After collecting all triangles from the `NativeStream`, each vertex position is quantized to a `int3` key (position × 10,000, rounded) and looked up in a `NativeHashMap<int3, int>`. If a matching key exists, the existing index is reused; otherwise a new vertex is inserted. This absorbs floating-point rounding differences that arise when two neighboring cells independently interpolate the same edge.
 
-```
-Without caching (resolution = 16, ~50% surface fill):
-  ~5,000 triangles × 3 = ~15,000 vertices
-
-With caching:
-  Each edge vertex shared by 2–4 adjacent cells → ~60–70% reduction
-  → ~5,000–6,000 unique vertices
-
-Benefits:
-  • Vertex buffer size  ↓ ~65%
-  • RecalculateNormals averages across shared vertices → smooth shading
-  • GPU vertex fetch and interpolation cost reduced proportionally
-```
+| | 캐싱 없음 | 캐싱 적용 |
+|---|---|---|
+| 버텍스 수 (resolution=16, ~50% fill) | ~15,000 (삼각형 수 × 3) | ~5,000–6,000 (고유 버텍스) |
+| 버텍스 버퍼 크기 | 기준 | **~65% 감소** |
+| 노멀 셰이딩 | Flat (페이스 노멀, 각진 느낌) | **Smooth (평균 노멀, 부드러운 느낌)** |
+| GPU 버텍스 처리량 | 기준 | 비례하여 감소 |
 
 A `Smooth Shading` toggle in the Inspector switches between the cached (smooth) and uncached (flat) path at runtime — useful for style comparisons or intentional low-poly aesthetics.
 
@@ -217,22 +208,19 @@ A `Smooth Shading` toggle in the Inspector switches between the cached (smooth) 
 
 The pre-existing `lodStep` parameter (which skips every N cells when marching) was wired up to a distance-aware system in `ChunkManager`. LOD bands are fully configurable in the Inspector and can be toggled on/off with a single checkbox.
 
-```
-Enable LOD  ☑
-Lod Bands:
-  Distance ≤ 1  →  LodStep 1   (full resolution, player's immediate surroundings)
-  Distance ≤ 3  →  LodStep 2   (75% fewer triangles)
-  Distance > 3  →  LodStep 4   (94% fewer triangles)
-```
+| 거리 (맨해튼) | LodStep | 삼각형 절감 | 설명 |
+|---|---|---|---|
+| ≤ 1 | 1 | — | 풀 해상도 (플레이어 주변) |
+| ≤ 3 | 2 | **75%** | 중거리 |
+| > 3 | 4 | **94%** | 원거리 |
 
 When the player crosses a chunk boundary, `UpdateChunkLOD` detects which chunks changed band, updates their `LodStep`, and calls `TriggerRebuild()`. This re-schedules only the MC job — no density recalculation — since the `NativeArray` data is already in place.
 
-```
-renderDistance = 3  →  49 total chunks
-Without LOD: 49 × ~5,000 triangles = ~245,000 triangles
-With LOD:    9 near × 5,000 + 40 far × ~300–1,250 = ~57,000–95,000 triangles
-Triangle count reduction: ~60–75%
-```
+| | LOD 없음 | LOD 적용 (renderDistance=3) |
+|---|---|---|
+| 전체 청크 수 | 49 | 49 |
+| 총 삼각형 수 | ~245,000 | ~57,000–95,000 |
+| 삼각형 절감 | — | **약 60–75%** |
 
 ---
 
@@ -242,11 +230,11 @@ Previously, assigning `meshCollider.sharedMesh = mesh` triggered a synchronous p
 
 `BakeMeshJob` wraps `Physics.BakeMesh(meshID, false)`, which Unity 2022+ allows to run on worker threads. The job is scheduled immediately after `ApplyMesh` returns (mesh data is already on the GPU), and the collider assignment is deferred to the frame `bakeJobHandle.IsCompleted` returns true.
 
-```
-Before: mesh upload → collider bake (2–5 ms, main thread) → next frame
-After:  mesh upload → BakeMeshJob.Schedule() → 0 ms main thread cost
-        collider assigned silently 1–2 frames later on completion
-```
+| | Before | After |
+|---|---|---|
+| 베이킹 실행 위치 | Main thread (블로킹) | Worker thread (비동기) |
+| Main thread 비용 | 2–5 ms / 청크 | **0 ms** |
+| 콜라이더 반영 시점 | 즉시 (같은 프레임) | 1–2 프레임 후 자동 반영 |
 
 For distant chunks (configurable via `Collider Max Lod Step`), baking is skipped entirely — the player cannot reach them, so collision is unnecessary.
 
