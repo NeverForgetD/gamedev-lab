@@ -5,7 +5,6 @@ public class BoidSpawner : MonoBehaviour
     public GameObject boidPrefab;
     public int boidCount = 100;
     public float spawnRadius = 10f;
-    public BoidSettings settings;
 
     public BoidController[] Spawn()
     {
@@ -15,7 +14,7 @@ public class BoidSpawner : MonoBehaviour
             Vector3 pos = transform.position + Random.insideUnitSphere * spawnRadius;
             GameObject go = Instantiate(boidPrefab, pos, Random.rotation);
             boids[i] = go.GetComponent<BoidController>();
-            boids[i].Init(Random.onUnitSphere * settings.minSpeed, settings);
+            boids[i].Init(Random.onUnitSphere);
         }
         return boids;
     }

@@ -5,6 +5,9 @@ public class BoidsManager : MonoBehaviour
     [Header("References")]
     public BoidSpawner spawner;
 
+    [Header("Settings")]
+    public BoidSettings settings;
+
     [Header("Boundary")]
     public float boundaryRadius = 20f;
     public float boundaryForce = 5f;
@@ -26,7 +29,7 @@ public class BoidsManager : MonoBehaviour
         for (int i = 0; i < _boids.Length; i++)
         {
             ApplyBoundary(_boids[i]);
-            _boids[i].UpdateBoid(_boidData);
+            _boids[i].UpdateBoid(_boidData, settings);
         }
     }
 

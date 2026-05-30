@@ -151,7 +151,6 @@ MonoBehaviour:
   boidPrefab: {fileID: 5627976079863468326, guid: 1462fb2ae40624e4f8b11967e437c6bd, type: 3}
   boidCount: 100
   spawnRadius: 10
-  settings: {fileID: 11400000, guid: 7f01849a578464940a25dc554f991193, type: 2}
 --- !u!4 &169893325
 Transform:
   m_ObjectHideFlags: 0
@@ -476,6 +475,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::BoidsManager
   spawner: {fileID: 169893324}
+  settings: {fileID: 11400000, guid: 7f01849a578464940a25dc554f991193, type: 2}
   boundaryRadius: 20
   boundaryForce: 5
 --- !u!1 &832575517

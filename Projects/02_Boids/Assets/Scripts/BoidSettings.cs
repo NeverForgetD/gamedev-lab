@@ -1,7 +1,8 @@
+using System;
 using UnityEngine;
 
-[CreateAssetMenu(menuName = "Boids/BoidSettings")]
-public class BoidSettings : ScriptableObject
+[Serializable]
+public class BoidSettings
 {
     [Header("Speed")]
     public float minSpeed = 2f;
