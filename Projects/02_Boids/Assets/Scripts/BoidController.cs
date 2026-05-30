@@ -2,26 +2,15 @@ using UnityEngine;
 
 public class BoidController : MonoBehaviour
 {
-    [Header("Speed")]
-    public float minSpeed = 2f;
-    public float maxSpeed = 5f;
-
-    [Header("Perception")]
-    public float perceptionRadius = 3f;
-    public float separationRadius = 1.5f;
-
-    [Header("Weights")]
-    public float separationWeight = 1.5f;
-    public float alignmentWeight = 1f;
-    public float cohesionWeight = 1f;
-
     [HideInInspector] public Vector3 velocity;
 
+    private BoidSettings _settings;
     private BoidData[] _allBoids;
 
-    public void Init(Vector3 initialVelocity)
+    public void Init(Vector3 initialVelocity, BoidSettings settings)
     {
         velocity = initialVelocity;
+        _settings = settings;
     }
 
     public void UpdateBoid(BoidData[] allBoids)
@@ -32,9 +21,9 @@ public class BoidController : MonoBehaviour
         Vector3 alignment = Alignment();
         Vector3 cohesion = Cohesion();
 
-        Vector3 acceleration = separation * separationWeight
-                             + alignment  * alignmentWeight
-                             + cohesion   * cohesionWeight;
+        Vector3 acceleration = separation * _settings.separationWeight
+                             + alignment  * _settings.alignmentWeight
+                             + cohesion   * _settings.cohesionWeight;
 
         velocity += acceleration * Time.deltaTime;
         velocity = ClampSpeed(velocity);
@@ -53,10 +42,9 @@ public class BoidController : MonoBehaviour
         foreach (var boid in _allBoids)
         {
             float dist = Vector3.Distance(transform.position, boid.position);
-            if (dist > 0f && dist < separationRadius)
+            if (dist > 0f && dist < _settings.separationRadius)
             {
-                Vector3 away = (transform.position - boid.position).normalized / dist;
-                steer += away;
+                steer += (transform.position - boid.position).normalized / dist;
                 count++;
             }
         }
@@ -75,7 +63,7 @@ public class BoidController : MonoBehaviour
         foreach (var boid in _allBoids)
         {
             float dist = Vector3.Distance(transform.position, boid.position);
-            if (dist > 0f && dist < perceptionRadius)
+            if (dist > 0f && dist < _settings.perceptionRadius)
             {
                 avgVelocity += boid.velocity;
                 count++;
@@ -97,7 +85,7 @@ public class BoidController : MonoBehaviour
         foreach (var boid in _allBoids)
         {
             float dist = Vector3.Distance(transform.position, boid.position);
-            if (dist > 0f && dist < perceptionRadius)
+            if (dist > 0f && dist < _settings.perceptionRadius)
             {
                 avgPosition += boid.position;
                 count++;
@@ -114,10 +102,8 @@ public class BoidController : MonoBehaviour
     private Vector3 ClampSpeed(Vector3 v)
     {
         float speed = v.magnitude;
-        if (speed < minSpeed)
-            return v.normalized * minSpeed;
-        if (speed > maxSpeed)
-            return v.normalized * maxSpeed;
+        if (speed < _settings.minSpeed) return v.normalized * _settings.minSpeed;
+        if (speed > _settings.maxSpeed) return v.normalized * _settings.maxSpeed;
         return v;
     }
 }

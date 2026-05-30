@@ -119,6 +119,54 @@ NavMeshSettings:
     debug:
       m_Flags: 0
   m_NavMeshData: {fileID: 0}
+--- !u!1 &169893323
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 169893325}
+  - component: {fileID: 169893324}
+  m_Layer: 0
+  m_Name: BoidSpawner
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &169893324
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 169893323}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: bb8dd9cb210b7314daa23599bee9741f, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::BoidSpawner
+  boidPrefab: {fileID: 5627976079863468326, guid: 1462fb2ae40624e4f8b11967e437c6bd, type: 3}
+  boidCount: 100
+  spawnRadius: 10
+  settings: {fileID: 11400000, guid: 7f01849a578464940a25dc554f991193, type: 2}
+--- !u!4 &169893325
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 169893323}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &330585543
 GameObject:
   m_ObjectHideFlags: 0
@@ -427,9 +475,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: c588a5050738b1a41912a58bb32d7359, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::BoidsManager
-  boidPrefab: {fileID: 5627976079863468326, guid: 1462fb2ae40624e4f8b11967e437c6bd, type: 3}
-  boidCount: 100
-  spawnRadius: 10
+  spawner: {fileID: 169893324}
   boundaryRadius: 20
   boundaryForce: 5
 --- !u!1 &832575517
@@ -489,3 +535,4 @@ SceneRoots:
   - {fileID: 410087041}
   - {fileID: 832575519}
   - {fileID: 478123617}
+  - {fileID: 169893325}
