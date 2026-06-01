@@ -19,4 +19,10 @@ public class BoidSettings
 
     [Header("Steering")]
     public float maxSteerForce = 3f;
+
+    [Header("Collisions")]
+    public LayerMask collisionMask;
+    public float collisionRadius = 0.27f;
+    public float collisionAvoidanceWeight = 10f;
+    public float collisionAvoidanceDistance = 5f;
 }

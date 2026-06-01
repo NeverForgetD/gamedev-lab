@@ -10,7 +10,6 @@ public class BoidsManager : MonoBehaviour
 
     [Header("Boundary")]
     public float boundaryRadius = 20f;
-    public float boundaryForce = 5f;
 
     private BoidController[] _boids;
     private BoidData[] _boidData;
@@ -28,7 +27,7 @@ public class BoidsManager : MonoBehaviour
 
         for (int i = 0; i < _boids.Length; i++)
         {
-            ApplyBoundary(_boids[i]);
+            //ApplyBoundary(_boids[i]);
             _boids[i].UpdateBoid(_boidData, settings);
         }
     }
@@ -37,7 +36,12 @@ public class BoidsManager : MonoBehaviour
     {
         Vector3 offset = boid.transform.position - transform.position;
         if (offset.magnitude > boundaryRadius)
-            boid.velocity += -offset.normalized * boundaryForce * Time.deltaTime;
+        {
+            Vector3 outward = offset.normalized;
+            float outwardSpeed = Vector3.Dot(boid.velocity, outward);
+            if (outwardSpeed > 0f)
+                boid.velocity -= 2f * outwardSpeed * outward;
+        }
     }
 
     private void OnDrawGizmosSelected()

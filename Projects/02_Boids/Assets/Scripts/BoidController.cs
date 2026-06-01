@@ -17,6 +17,12 @@ public class BoidController : MonoBehaviour
                              + Alignment(allBoids, s)  * s.alignmentWeight
                              + Cohesion(allBoids, s)   * s.cohesionWeight;
 
+        if (IsHeadingForCollision(s))
+        {
+            Vector3 clearDir = ObstacleRays(s);
+            acceleration += SteerTowards(clearDir, s) * s.collisionAvoidanceWeight;
+        }
+
         velocity += acceleration * Time.deltaTime;
         velocity = ClampSpeed(velocity, s);
 
@@ -101,6 +107,27 @@ public class BoidController : MonoBehaviour
         if (speed < s.minSpeed) return v.normalized * s.minSpeed;
         if (speed > s.maxSpeed) return v.normalized * s.maxSpeed;
         return v;
+    }
+
+    bool IsHeadingForCollision(BoidSettings s)
+    {
+        RaycastHit hit;
+        if (Physics.SphereCast(transform.position, s.collisionRadius, transform.forward, out hit, s.collisionAvoidanceDistance, s.collisionMask))
+            return true;
+        return false;
+    }
+
+    private Vector3 ObstacleRays(BoidSettings s)
+    {
+        Vector3[] dirs = BoidHelper.directions;
+        for (int i = 0; i < dirs.Length; i++)
+        {
+            Vector3 dir = transform.TransformDirection(dirs[i]);
+            Ray ray = new Ray(transform.position, dir);
+            if (!Physics.SphereCast(ray, s.collisionRadius, s.collisionAvoidanceDistance, s.collisionMask))
+                return dir;
+        }
+        return transform.forward;
     }
 
     private void OnDrawGizmos()
