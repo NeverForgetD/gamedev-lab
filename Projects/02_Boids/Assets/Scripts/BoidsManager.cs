@@ -24,7 +24,7 @@ public class BoidsManager : MonoBehaviour
     private void Update()
     {
         for (int i = 0; i < _boids.Length; i++)
-            _boidData[i] = new BoidData(_boids[i].transform.position, _boids[i].velocity);
+            _boidData[i] = _boids[i].data;
 
         for (int i = 0; i < _boids.Length; i++)
         {
