@@ -156,7 +156,8 @@ public class BoidController : MonoBehaviour
         int   mask = cachedSettings.collisionMask;
 
         // BoidHelper.directions — 구면 위 300개 점
-        Gizmos.color = Color.white;
+        //Gizmos.color = Color.white;
+        Gizmos.color = new Color(0.4f, 0.4f, 0.4f);
         foreach (var dir in BoidHelper.directions)
         {
             Vector3 worldDir = transform.TransformDirection(dir);

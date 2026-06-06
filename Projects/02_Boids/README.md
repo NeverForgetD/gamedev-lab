@@ -137,11 +137,89 @@ return Vector3.ClampMagnitude(steer, maxSteerForce);
 
 ---
 
-### 2. 🧱 환경 상호작용 + 행동 확장
+### 2. 🧱 장애물 회피 (Obstacle Avoidance)
 
-> 단순히 떠다니는 군집이 아니라, 게임 월드 안에서 목적을 가지고 움직이는 군집으로 확장합니다.
+> 단순히 떠다니는 군집이 아니라, 게임 월드 안에서 장애물을 스스로 피하며 움직이는 군집으로 확장합니다.
 
 <!-- > ▶ [Week 2](링크) -->
+
+![Boids_2주차_00](Images/Boids_2주차_00.gif)
+
+#### BoidHelper — 황금비 나선 구면 샘플링
+
+장애물 회피의 핵심은 "막히지 않은 방향"을 빠르게 찾는 것입니다. 이를 위해 `BoidHelper`는 구면 위에 300개의 방향 벡터를 미리 계산해 static으로 보관합니다.
+
+방향 벡터를 생성할 때 **인덱스 순서**가 핵심입니다. `t = i / N`으로 inclination이 0 → π로 선형 증가하기 때문에, 인덱스 0번은 정면(forward), 뒤로 갈수록 옆·뒤쪽 방향으로 퍼집니다. 여기에 **황금비(φ ≈ 1.618)** 를 azimuth 증분으로 사용합니다. 황금비는 어떤 분수로도 정확히 근사되지 않는 특성 때문에 나선이 절대 겹치거나 한쪽에 몰리지 않고, 각 인덱스 구간에서 구면 위의 방향이 고르게 분포됩니다.
+
+이 두 특성이 결합된 결과, `ObstacleRays`에서 인덱스 0번부터 순회하면 **균등하게 퍼진 방향들을 정면에서부터 차례로 탐색**하게 됩니다. 별도의 정렬이나 거리 비교 없이 단순 순회만으로, 첫 번째로 발견한 통과 방향이 자연스럽게 현재 진행 방향과 가장 가까운 열린 방향이 됩니다.
+
+```csharp
+float goldenRatio = (1 + Mathf.Sqrt(5)) / 2;
+float angleIncrement = Mathf.PI * 2 * goldenRatio;
+
+for (int i = 0; i < numViewDirections; i++)
+{
+    float t = (float)i / numViewDirections;
+    float inclination = Mathf.Acos(1 - 2 * t);
+    float azimuth = angleIncrement * i;
+
+    float x = Mathf.Sin(inclination) * Mathf.Cos(azimuth);
+    float y = Mathf.Sin(inclination) * Mathf.Sin(azimuth);
+    float z = Mathf.Cos(inclination);
+    directions[i] = new Vector3(x, y, z);
+}
+```
+
+인덱스 순서대로 forward(정면)에서 시작해 점점 옆과 뒤쪽으로 퍼져나가는 구조입니다. 이 순서가 이후 장애물 회피에서 핵심 역할을 합니다.
+
+#### 장애물 감지 — IsHeadingForCollision
+
+매 프레임 현재 진행 방향(forward)으로 `SphereCast`를 쏩니다. `collisionAvoidanceDistance` 안에 장애물이 감지되면 회피 로직을 시작합니다.
+
+```csharp
+Physics.SphereCast(transform.position, s.collisionRadius, transform.forward,
+    out hit, s.collisionAvoidanceDistance, s.collisionMask)
+```
+
+ray가 아닌 sphere를 쓰는 이유는 Boid 자체의 부피를 고려해야 하기 때문입니다. `collisionRadius`는 Boid의 실제 크기에 맞게 설정합니다.
+
+#### 대체 방향 탐색 — ObstacleRays
+
+장애물이 감지되면 `BoidHelper.directions`의 300개 방향을 인덱스 0번부터 순서대로 순회합니다. 각 방향으로 동일한 `SphereCast`를 쏘고, **막히지 않는 첫 번째 방향을 즉시 반환**합니다.
+
+```csharp
+for (int i = 0; i < dirs.Length; i++)
+{
+    Vector3 dir = transform.TransformDirection(dirs[i]);
+    Ray ray = new Ray(transform.position, dir);
+    if (!Physics.SphereCast(ray, s.collisionRadius, s.collisionAvoidanceDistance, s.collisionMask))
+        return dir;
+}
+```
+
+황금비 나선 순서 덕분에 정면에 가까운 방향부터 탐색하게 되고, 결과적으로 **현재 진행 방향을 최소한으로 바꾸는 경로**를 자연스럽게 선택합니다. 찾은 방향은 `collisionAvoidanceWeight(10f)`가 곱해진 강한 조향력으로 적용되어 다른 flocking 규칙을 압도합니다.
+
+#### 디버그 기즈모 — DrawDebugGizmos
+
+구현 과정을 시각적으로 확인하기 위해 `GizmoType` enum으로 표시 모드를 제어하는 디버그 기즈모를 추가했습니다.
+
+```csharp
+public enum GizmoType { Never, SelectedOnly, Always }
+```
+
+`SelectedOnly`로 설정하면 Hierarchy에서 선택한 Boid 하나에만 기즈모가 표시됩니다.
+
+| 색상 | 의미 |
+|------|------|
+| 회색 점 (300개) | `BoidHelper.directions` 구면 위 방향 샘플 |
+| 초록 선 | forward SphereCast 통과 — 장애물 없음 |
+| 빨간 선 | forward SphereCast 감지 — 회피 로직 활성화 |
+| 반투명 짧은 빨간 선 | `ObstacleRays`에서 막힌 방향 |
+| 하얀 선 | `ObstacleRays`에서 찾은 첫 번째 통과 방향 (실제 조향 목표) |
+
+
+![Boids_2주차_01](Images/Boids_2주차_01.gif)
+![Boids_2주차_02](Images/Boids_2주차_02.gif)
 
 ---
 
