@@ -6,7 +6,7 @@ Boids는 각각의 개체가 복잡한 AI를 갖는 것이 아니라, 주변 개
 
 기본 Boids 구현부터 시작해, 게임 월드 적용, 공간 분할 최적화, 최종 데모 제작까지 진행합니다.
 
-📺 **전체 플레이리스트** → [Boids Dev Log — Unity](링크)
+<!-- 📺 **전체 플레이리스트** → [Boids Dev Log — Unity](링크) -->
 
 ---
 
@@ -52,7 +52,88 @@ Boids는 각각의 개체가 복잡한 AI를 갖는 것이 아니라, 주변 개
 
 > CPU에서 Separation, Alignment, Cohesion 세 가지 규칙을 이용해 기본적인 군집 움직임을 구현합니다.
 
-> ▶ [Week 1](링크)
+<!-- > ▶ [Week 1](링크) -->
+
+![Boids_1주차](Images/Boids_1주차.gif)
+
+#### BoidData & BoidSettings
+
+각 Boid의 상태는 `BoidData` struct로 관리합니다. 매 프레임 모든 Boid의 배열을 순회할 때 불필요한 컴포넌트 참조 없이 위치와 방향만 전달할 수 있도록 가볍게 유지합니다.
+
+```csharp
+public struct BoidData
+{
+    public Vector3 position;
+    public Vector3 direction;
+}
+```
+
+군집 행동에 필요한 파라미터는 `BoidSettings`에 모아 `BoidsManager`에서 중앙 관리합니다.
+
+#### Separation / Alignment / Cohesion
+
+세 규칙 모두 `perceptionRadius`(또는 `separationRadius`) 안의 이웃 Boid를 순회해 평균값을 구한 뒤, `SteerTowards`로 조향력을 계산합니다.
+
+**🔴 Separation** — 너무 가까운 이웃을 밀어냄. 거리에 반비례해 가중치를 높여 가까울수록 강하게 반응합니다.
+
+```csharp
+foreach (var boid in allBoids)
+{
+    float dist = Vector3.Distance(transform.position, boid.position);
+    if (dist > 0f && dist < s.separationRadius)
+    {
+        avgAvoid += (transform.position - boid.position).normalized / dist;
+        count++;
+    }
+}
+```
+
+**🟡 Alignment** — 이웃들의 평균 방향으로 맞춤.
+
+```csharp
+foreach (var boid in allBoids)
+{
+    float dist = Vector3.Distance(transform.position, boid.position);
+    if (dist > 0f && dist < s.perceptionRadius)
+    {
+        avgDir += boid.direction;
+        count++;
+    }
+}
+```
+
+**🟢 Cohesion** — 이웃들의 평균 위치(중심점)를 향해 이동.
+
+```csharp
+foreach (var boid in allBoids)
+{
+    float dist = Vector3.Distance(transform.position, boid.position);
+    if (dist > 0f && dist < s.perceptionRadius)
+    {
+        avgPosition += boid.position;
+        count++;
+    }
+}
+return SteerTowards(avgPosition - transform.position, s);
+```
+
+세 힘은 각각의 weight를 곱해 합산되고, `SteerTowards`를 통해 `maxSteerForce`로 클램핑된 조향 벡터로 변환됩니다.
+
+```csharp
+Vector3 acceleration = Separation(allBoids, s) * s.separationWeight
+                     + Alignment(allBoids, s)  * s.alignmentWeight
+                     + Cohesion(allBoids, s)   * s.cohesionWeight;
+```
+
+```csharp
+// Reynolds steering: 목표 방향의 최대 속도 벡터에서 현재 속도를 뺀 값
+Vector3 steer = desired.normalized * maxSpeed - velocity;
+return Vector3.ClampMagnitude(steer, maxSteerForce);
+```
+
+> **⚠️ 현재 시간복잡도: O(N²)**  
+> 매 프레임 모든 Boid가 나머지 모든 Boid를 순회하기 때문에, 개체 수가 늘어날수록 연산량이 제곱으로 증가합니다.  
+> **3주차에서 Spatial Hash 또는 Uniform Grid를 도입해 주변 탐색 범위를 제한하고 O(N) 수준으로 개선할 예정입니다.**
 
 ---
 
@@ -60,7 +141,7 @@ Boids는 각각의 개체가 복잡한 AI를 갖는 것이 아니라, 주변 개
 
 > 단순히 떠다니는 군집이 아니라, 게임 월드 안에서 목적을 가지고 움직이는 군집으로 확장합니다.
 
-> ▶ [Week 2](링크)
+<!-- > ▶ [Week 2](링크) -->
 
 ---
 
@@ -70,7 +151,7 @@ Boids는 각각의 개체가 복잡한 AI를 갖는 것이 아니라, 주변 개
 > 그 외 GPU Instancing, 오브젝트 풀링, 디버깅 시각화, 파라미터 프리셋 등을 적용해 다수의 Boid가 안정적으로 동작하도록 폴리싱합니다.  
 > 전체 Boid 위치/방향을 `ComputeBuffer`에 담아 GPU Compute Shader로 처리합니다.
 
-> ▶ [Week 3](링크)
+<!-- > ▶ [Week 3](링크) -->
 
 ---
 
@@ -79,7 +160,7 @@ Boids는 각각의 개체가 복잡한 AI를 갖는 것이 아니라, 주변 개
 > 앞서 구현한 Boids 알고리즘, 게임플레이 확장, 최적화 과정을 정리하고 최종 데모를 다듬습니다.  
 > 성능 비교, 파라미터 변화, 구현 중 겪은 문제와 해결 방법을 발표 자료 또는 기술 블로그 형태로 공유합니다.
 
-> ▶ [Week 4](링크)
+<!-- > ▶ [Week 4](링크) -->
 
 ---
 
@@ -87,7 +168,7 @@ Boids는 각각의 개체가 복잡한 AI를 갖는 것이 아니라, 주변 개
 
 | 주차 | 핵심 내용 | 영상 |
 |------|-----------|------|
-| Week 1 | Boids 기본 알고리즘 · Separation · Alignment · Cohesion | [▶ Week 1](링크) |
-| Week 2 | 장애물 회피 · 환경 상호작용 · 행동 확장 | [▶ Week 2](링크) |
-| Week 3 | 공간 분할 최적화 · GPU Instancing · 렌더링 최적화 | [▶ Week 3](링크) |
-| Week 4 | 최종 데모 · 폴리싱 · 발표 | [▶ Week 4](링크) |
+| Week 1 | Boids 기본 알고리즘 · Separation · Alignment · Cohesion | <!-- [▶ Week 1](링크) --> |
+| Week 2 | 장애물 회피 · 환경 상호작용 · 행동 확장 | <!-- [▶ Week 2](링크) --> |
+| Week 3 | 공간 분할 최적화 · GPU Instancing · 렌더링 최적화 | <!-- [▶ Week 3](링크) --> |
+| Week 4 | 최종 데모 · 폴리싱 · 발표 | <!-- [▶ Week 4](링크) --> |
