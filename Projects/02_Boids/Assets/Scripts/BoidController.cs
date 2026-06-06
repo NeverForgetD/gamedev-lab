@@ -5,6 +5,12 @@ public class BoidController : MonoBehaviour
     [HideInInspector] public Vector3 velocity;
     public BoidData data;
 
+    public enum GizmoType { Never, SelectedOnly, Always }
+
+    [Header("Debug")]
+    public GizmoType debugGizmos = GizmoType.Never;
+    private BoidSettings cachedSettings;
+
     public void Init(Vector3 initialVelocity)
     {
         velocity = initialVelocity;
@@ -13,6 +19,7 @@ public class BoidController : MonoBehaviour
 
     public void UpdateBoid(BoidData[] allBoids, BoidSettings s)
     {
+        cachedSettings = s;
         Vector3 acceleration = Separation(allBoids, s) * s.separationWeight
                              + Alignment(allBoids, s)  * s.alignmentWeight
                              + Cohesion(allBoids, s)   * s.cohesionWeight;
@@ -132,7 +139,57 @@ public class BoidController : MonoBehaviour
 
     private void OnDrawGizmos()
     {
-        Gizmos.color = Color.red;
-        Gizmos.DrawRay(transform.position, transform.forward);
+        if (debugGizmos == GizmoType.Always) DrawDebugGizmos();
+    }
+
+    private void OnDrawGizmosSelected()
+    {
+        if (debugGizmos == GizmoType.SelectedOnly) DrawDebugGizmos();
+    }
+
+    private void DrawDebugGizmos()
+    {
+        if (cachedSettings == null) return;
+
+        float dist = cachedSettings.collisionAvoidanceDistance;
+        float r    = cachedSettings.collisionRadius;
+        int   mask = cachedSettings.collisionMask;
+
+        // BoidHelper.directions — 구면 위 300개 점
+        Gizmos.color = Color.white;
+        foreach (var dir in BoidHelper.directions)
+        {
+            Vector3 worldDir = transform.TransformDirection(dir);
+            Gizmos.DrawSphere(transform.position + worldDir * dist, 0.04f);
+        }
+
+        // Forward SphereCast (IsHeadingForCollision) 상태 표시
+        bool headingForCollision = Physics.SphereCast(
+            transform.position, r, transform.forward, out _, dist, mask);
+
+        Gizmos.color = headingForCollision ? Color.red : Color.green;
+        Gizmos.DrawRay(transform.position, transform.forward * dist);
+
+        // ObstacleRays — blocked: 짧은 빨간 선 / first clear: 시안 선
+        if (headingForCollision)
+        {
+            Vector3[] dirs = BoidHelper.directions;
+            for (int i = 0; i < dirs.Length; i++)
+            {
+                Vector3 worldDir = transform.TransformDirection(dirs[i]);
+                Ray ray = new Ray(transform.position, worldDir);
+                bool blocked = Physics.SphereCast(ray, r, dist, mask);
+
+                if (!blocked)
+                {
+                    Gizmos.color = Color.cyan;
+                    Gizmos.DrawRay(transform.position, worldDir * dist);
+                    break;
+                }
+
+                Gizmos.color = new Color(1f, 0.2f, 0.2f, 0.25f);
+                Gizmos.DrawRay(transform.position, worldDir * dist * 0.4f);
+            }
+        }
     }
 }
