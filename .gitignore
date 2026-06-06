@@ -135,5 +135,9 @@ crashlytics-build.properties
 .dev/
 .claude/
 
+# Test folders
+**/Assets/Test/
+**/Assets/Test.meta
+
 
 # End of https://www.toptal.com/developers/gitignore/api/unity
