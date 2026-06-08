@@ -17,12 +17,14 @@ public class BoidController : MonoBehaviour
         data = new BoidData(transform.position, velocity.normalized);
     }
 
-    public void UpdateBoid(BoidData[] allBoids, BoidSettings s)
+    public void UpdateBoid(BoidData[] allBoids, BoidSettings s, BoidContext ctx)
     {
         cachedSettings = s;
         Vector3 acceleration = Separation(allBoids, s) * s.separationWeight
                              + Alignment(allBoids, s)  * s.alignmentWeight
-                             + Cohesion(allBoids, s)   * s.cohesionWeight;
+                             + Cohesion(allBoids, s)   * s.cohesionWeight
+                             + TargetSeek(ctx, s)      * s.targetWeight
+                             + PredatorFlee(ctx, s)    * s.predatorWeight;
 
         if (IsHeadingForCollision(s))
         {
@@ -100,6 +102,21 @@ public class BoidController : MonoBehaviour
         if (count == 0) return Vector3.zero;
         avgPosition /= count;
         return SteerTowards(avgPosition - transform.position, s);
+    }
+
+    private Vector3 TargetSeek(BoidContext ctx, BoidSettings s)
+    {
+        if (!ctx.hasTarget) return Vector3.zero;
+        return SteerTowards(ctx.targetPosition - transform.position, s);
+    }
+
+    private Vector3 PredatorFlee(BoidContext ctx, BoidSettings s)
+    {
+        if (!ctx.hasPredator) return Vector3.zero;
+        Vector3 diff = transform.position - ctx.predatorPosition;
+        float dist = diff.magnitude;
+        if (dist > s.predatorRadius || dist < 0.001f) return Vector3.zero;
+        return SteerTowards(diff.normalized / dist, s);
     }
 
     private Vector3 SteerTowards(Vector3 desired, BoidSettings s)

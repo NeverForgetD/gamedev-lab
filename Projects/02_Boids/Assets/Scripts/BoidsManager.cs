@@ -8,6 +8,12 @@ public class BoidsManager : MonoBehaviour
     [Header("Settings")]
     public BoidSettings settings;
 
+    [Header("Target")]
+    public Transform target;
+
+    [Header("Predator")]
+    public Transform predator;
+
     [Header("Boundary")]
     public float boundaryRadius = 20f;
 
@@ -25,10 +31,18 @@ public class BoidsManager : MonoBehaviour
         for (int i = 0; i < _boids.Length; i++)
             _boidData[i] = _boids[i].data;
 
+        BoidContext ctx = new BoidContext
+        {
+            hasTarget       = target != null,
+            targetPosition  = target   != null ? target.position   : Vector3.zero,
+            hasPredator     = predator != null,
+            predatorPosition = predator != null ? predator.position : Vector3.zero
+        };
+
         for (int i = 0; i < _boids.Length; i++)
         {
             //ApplyBoundary(_boids[i]);
-            _boids[i].UpdateBoid(_boidData, settings);
+            _boids[i].UpdateBoid(_boidData, settings, ctx);
         }
     }
 

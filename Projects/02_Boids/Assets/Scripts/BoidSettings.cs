@@ -44,4 +44,11 @@ public class BoidSettings
     public float collisionRadius = 0.27f;
     public float collisionAvoidanceWeight = 10f;
     public float collisionAvoidanceDistance = 5f;
+
+    [Header("Target")]
+    public float targetWeight = 1f;
+
+    [Header("Predator")]
+    public float predatorRadius = 8f;
+    public float predatorWeight = 10f;
 }
