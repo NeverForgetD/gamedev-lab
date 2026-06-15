@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using UnityEngine;
 
 public class BoidsManager : MonoBehaviour
@@ -20,6 +21,13 @@ public class BoidsManager : MonoBehaviour
     private BoidController[] _boids;
     private BoidData[] _boidData;
 
+    // ─── 벤치마크 계측 ──────────────────────────────────────
+    // 시뮬레이션(인지+조향) 루프만 따로 잰다. 렌더/vsync와 분리해
+    // 알고리즘 개선 효과를 순수하게 측정하기 위함.
+    private readonly Stopwatch _simWatch = new Stopwatch();
+    public float SimMs { get; private set; }      // EWMA 평활된 시뮬 ms
+    public int BoidCount => _boids != null ? _boids.Length : 0;
+
     private void Start()
     {
         _boids = spawner.Spawn();
@@ -39,11 +47,17 @@ public class BoidsManager : MonoBehaviour
             predatorPosition = predator != null ? predator.position : Vector3.zero
         };
 
+        _simWatch.Restart();
         for (int i = 0; i < _boids.Length; i++)
         {
             //ApplyBoundary(_boids[i]);
             _boids[i].UpdateBoid(_boidData, settings, ctx);
         }
+        _simWatch.Stop();
+
+        // ms 단위로 변환 후 지수이동평균(α=0.1)으로 튐 완화
+        float ms = (float)(_simWatch.Elapsed.TotalMilliseconds);
+        SimMs = Mathf.Lerp(SimMs, ms, 0.1f);
     }
 
     private void ApplyBoundary(BoidController boid)
