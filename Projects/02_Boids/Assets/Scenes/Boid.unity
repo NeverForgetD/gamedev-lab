@@ -814,6 +814,8 @@ MonoBehaviour:
   target: {fileID: 0}
   predator: {fileID: 0}
   boundaryRadius: 20
+  perceptionMode: 2
+  drawGridGizmos: 0
 --- !u!1001 &567064689
 PrefabInstance:
   m_ObjectHideFlags: 0

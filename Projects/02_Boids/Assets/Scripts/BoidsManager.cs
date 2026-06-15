@@ -21,14 +21,17 @@ public class BoidsManager : MonoBehaviour
     // 인지(이웃 탐색) 방식. 같은 씬에서 토글하며 성능을 비교 측정한다.
     //   Legacy     = O(3N²), Vector3.Distance (최적화 이전, baseline)
     //   SinglePass = O(N²),  단일 패스 + sqrMagnitude (1·2단계)
-    public enum PerceptionMode { Legacy, SinglePass }
+    //   Grid       = O(N·k), Spatial Hash Grid로 주변 27셀만 검사 (3단계)
+    public enum PerceptionMode { Legacy, SinglePass, Grid }
 
     [Header("Optimization")]
-    public PerceptionMode perceptionMode = PerceptionMode.SinglePass;
+    public PerceptionMode perceptionMode = PerceptionMode.Grid;
+    public bool drawGridGizmos = false;
 
     private BoidController[] _boids;
     private BoidData[] _boidData;
     private PerceptionResult[] _perception;
+    private SpatialGrid _grid;
 
     // ─── 벤치마크 계측 ──────────────────────────────────────
     // 시뮬레이션(인지+조향) 루프만 따로 잰다. 렌더/vsync와 분리해
@@ -42,6 +45,7 @@ public class BoidsManager : MonoBehaviour
         _boids = spawner.Spawn();
         _boidData = new BoidData[_boids.Length];
         _perception = new PerceptionResult[_boids.Length];
+        _grid = new SpatialGrid(settings.perceptionRadius);
     }
 
     private void Update()
@@ -59,18 +63,22 @@ public class BoidsManager : MonoBehaviour
 
         _simWatch.Restart();
 
-        if (perceptionMode == PerceptionMode.SinglePass)
-        {
-            // 1·2단계: 이웃을 1패스 순회해 누산값 계산 → 조향만 적용
-            ComputePerceptionSinglePass(settings);
-            for (int i = 0; i < _boids.Length; i++)
-                _boids[i].UpdateBoid(in _perception[i], settings, ctx);
-        }
-        else
+        if (perceptionMode == PerceptionMode.Legacy)
         {
             // Legacy: 각 Boid가 내부에서 SAC를 각각 순회 (baseline)
             for (int i = 0; i < _boids.Length; i++)
                 _boids[i].UpdateBoid(_boidData, settings, ctx);
+        }
+        else
+        {
+            // SinglePass / Grid: Manager가 1패스로 인지 계산 → Boid는 조향만
+            if (perceptionMode == PerceptionMode.Grid)
+                ComputePerceptionGrid(settings);
+            else
+                ComputePerceptionSinglePass(settings);
+
+            for (int i = 0; i < _boids.Length; i++)
+                _boids[i].UpdateBoid(in _perception[i], settings, ctx);
         }
 
         _simWatch.Stop();
@@ -98,24 +106,58 @@ public class BoidsManager : MonoBehaviour
             for (int j = 0; j < n; j++)
             {
                 if (i == j) continue;
-
-                Vector3 offset = posI - _boidData[j].position;
-                float sqr = offset.sqrMagnitude;
-                if (sqr <= 0f || sqr >= perceptSqr) continue;
-
-                p.alignmentSum += _boidData[j].direction;   // Alignment
-                p.cohesionSum  += _boidData[j].position;     // Cohesion
-                p.flockCount++;
-
-                if (sqr < sepSqr)
-                {
-                    // offset.normalized / dist == offset / sqr → sqrt 불필요
-                    p.separationSum += offset / sqr;          // Separation
-                    p.separationCount++;
-                }
+                Accumulate(ref p, posI, _boidData[j], perceptSqr, sepSqr);
             }
 
             _perception[i] = p;
+        }
+    }
+
+    /// <summary>
+    /// 3단계 — Spatial Hash Grid 기반 탐색. 각 Boid는 자신의 셀 + 인접 26셀(3×3×3)만
+    /// 검사한다. 셀 크기 = perceptionRadius 이므로 반경 내 이웃은 반드시 27셀 안에 있다.
+    /// 평균 복잡도 O(N·k) (k = 이웃 밀도).
+    /// </summary>
+    private void ComputePerceptionGrid(BoidSettings s)
+    {
+        float perceptSqr = s.perceptionRadius * s.perceptionRadius;
+        float sepSqr     = s.separationRadius * s.separationRadius;
+        int n = _boidData.Length;
+
+        _grid.Rebuild(_boidData);
+
+        for (int i = 0; i < n; i++)
+        {
+            PerceptionResult p = default;
+            Vector3 posI = _boidData[i].position;
+
+            foreach (int j in _grid.Neighbors(posI))
+            {
+                if (i == j) continue;
+                Accumulate(ref p, posI, _boidData[j], perceptSqr, sepSqr);
+            }
+
+            _perception[i] = p;
+        }
+    }
+
+    /// <summary>이웃 boid 하나를 인지 누산값에 반영. SinglePass·Grid가 공유.</summary>
+    private static void Accumulate(ref PerceptionResult p, Vector3 posI, BoidData other,
+                                   float perceptSqr, float sepSqr)
+    {
+        Vector3 offset = posI - other.position;
+        float sqr = offset.sqrMagnitude;
+        if (sqr <= 0f || sqr >= perceptSqr) return;
+
+        p.alignmentSum += other.direction;   // Alignment
+        p.cohesionSum  += other.position;     // Cohesion
+        p.flockCount++;
+
+        if (sqr < sepSqr)
+        {
+            // offset.normalized / dist == offset / sqr → sqrt 불필요
+            p.separationSum += offset / sqr;  // Separation
+            p.separationCount++;
         }
     }
 
@@ -135,5 +177,19 @@ public class BoidsManager : MonoBehaviour
     {
         Gizmos.color = Color.blue;
         Gizmos.DrawWireSphere(transform.position, boundaryRadius);
+    }
+
+    private readonly System.Collections.Generic.List<Vector3> _gizmoCells
+        = new System.Collections.Generic.List<Vector3>();
+
+    private void OnDrawGizmos()
+    {
+        if (!drawGridGizmos || !Application.isPlaying || _grid == null) return;
+
+        _grid.GetOccupiedCellCenters(_gizmoCells);
+        Vector3 size = Vector3.one * _grid.CellSize;
+        Gizmos.color = new Color(0f, 1f, 0.6f, 0.25f);
+        foreach (var c in _gizmoCells)
+            Gizmos.DrawWireCube(c, size);
     }
 }
