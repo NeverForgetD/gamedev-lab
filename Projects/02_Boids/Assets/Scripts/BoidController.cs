@@ -17,14 +17,44 @@ public class BoidController : MonoBehaviour
         data = new BoidData(transform.position, velocity.normalized);
     }
 
+    // Legacy 경로 — 각 규칙이 전체 Boid를 따로 순회 (O(3N²), Vector3.Distance).
+    // baseline 측정용으로 보존한다.
     public void UpdateBoid(BoidData[] allBoids, BoidSettings s, BoidContext ctx)
     {
+        Vector3 sac = Separation(allBoids, s) * s.separationWeight
+                    + Alignment(allBoids, s)  * s.alignmentWeight
+                    + Cohesion(allBoids, s)   * s.cohesionWeight;
+        Integrate(sac, s, ctx);
+    }
+
+    // SinglePass 경로 — BoidsManager가 1패스로 계산한 인지 누산값을 조향력으로 변환.
+    // count == 0이면 해당 규칙은 기여 0 (Legacy의 early-return과 동일).
+    public void UpdateBoid(in PerceptionResult p, BoidSettings s, BoidContext ctx)
+    {
+        Vector3 sac = Vector3.zero;
+
+        if (p.separationCount > 0)
+            sac += SteerTowards(p.separationSum / p.separationCount, s) * s.separationWeight;
+
+        if (p.flockCount > 0)
+        {
+            Vector3 avgDir    = p.alignmentSum / p.flockCount;
+            Vector3 avgCenter = p.cohesionSum  / p.flockCount;
+            sac += SteerTowards(avgDir, s)                          * s.alignmentWeight;
+            sac += SteerTowards(avgCenter - transform.position, s)  * s.cohesionWeight;
+        }
+
+        Integrate(sac, s, ctx);
+    }
+
+    // SAC 조향력에 target/predator/충돌회피를 더해 속도·위치를 적분한다.
+    // 두 경로(Legacy/SinglePass)가 공유.
+    private void Integrate(Vector3 sacAcceleration, BoidSettings s, BoidContext ctx)
+    {
         cachedSettings = s;
-        Vector3 acceleration = Separation(allBoids, s) * s.separationWeight
-                             + Alignment(allBoids, s)  * s.alignmentWeight
-                             + Cohesion(allBoids, s)   * s.cohesionWeight
-                             + TargetSeek(ctx, s)      * s.targetWeight
-                             + PredatorFlee(ctx, s)    * s.predatorWeight;
+        Vector3 acceleration = sacAcceleration
+                             + TargetSeek(ctx, s)   * s.targetWeight
+                             + PredatorFlee(ctx, s) * s.predatorWeight;
 
         if (IsHeadingForCollision(s))
         {
