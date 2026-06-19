@@ -758,6 +758,7 @@ GameObject:
   m_Component:
   - component: {fileID: 478123617}
   - component: {fileID: 478123618}
+  - component: {fileID: 478123619}
   m_Layer: 0
   m_Name: BoidManager
   m_TagString: Untagged
@@ -814,8 +815,22 @@ MonoBehaviour:
   target: {fileID: 0}
   predator: {fileID: 0}
   boundaryRadius: 20
-  perceptionMode: 4
+  perceptionMode: 5
   drawGridGizmos: 0
+--- !u!114 &478123619
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 478123616}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 60a6f01261b2acf4495734ac12b68414, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::BoidInstancedRenderer
+  manager: {fileID: 478123618}
+  useGpuInstancing: 1
 --- !u!1001 &567064689
 PrefabInstance:
   m_ObjectHideFlags: 0
