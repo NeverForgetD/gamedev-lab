@@ -1,4 +1,6 @@
 using System.Diagnostics;
+using Unity.Collections;
+using Unity.Jobs;
 using UnityEngine;
 
 public class BoidsManager : MonoBehaviour
@@ -22,7 +24,8 @@ public class BoidsManager : MonoBehaviour
     //   Legacy     = O(3N²), Vector3.Distance (최적화 이전, baseline)
     //   SinglePass = O(N²),  단일 패스 + sqrMagnitude (1·2단계)
     //   Grid       = O(N·k), Spatial Hash Grid로 주변 27셀만 검사 (3단계)
-    public enum PerceptionMode { Legacy, SinglePass, Grid }
+    //   JobsBruteForce = O(N²)를 멀티코어 병렬 처리 (4a, Burst 미적용)
+    public enum PerceptionMode { Legacy, SinglePass, Grid, JobsBruteForce }
 
     [Header("Optimization")]
     public PerceptionMode perceptionMode = PerceptionMode.Grid;
@@ -32,6 +35,10 @@ public class BoidsManager : MonoBehaviour
     private BoidData[] _boidData;
     private PerceptionResult[] _perception;
     private SpatialGrid _grid;
+
+    // Jobs용 NativeArray (Persistent 할당, 매 프레임 재사용)
+    private NativeArray<BoidData> _naBoidData;
+    private NativeArray<PerceptionResult> _naPerception;
 
     // ─── 벤치마크 계측 ──────────────────────────────────────
     // 시뮬레이션(인지+조향) 루프만 따로 잰다. 렌더/vsync와 분리해
@@ -46,6 +53,15 @@ public class BoidsManager : MonoBehaviour
         _boidData = new BoidData[_boids.Length];
         _perception = new PerceptionResult[_boids.Length];
         _grid = new SpatialGrid(settings.perceptionRadius);
+
+        _naBoidData   = new NativeArray<BoidData>(_boids.Length, Allocator.Persistent);
+        _naPerception = new NativeArray<PerceptionResult>(_boids.Length, Allocator.Persistent);
+    }
+
+    private void OnDestroy()
+    {
+        if (_naBoidData.IsCreated)   _naBoidData.Dispose();
+        if (_naPerception.IsCreated) _naPerception.Dispose();
     }
 
     private void Update()
@@ -71,11 +87,13 @@ public class BoidsManager : MonoBehaviour
         }
         else
         {
-            // SinglePass / Grid: Manager가 1패스로 인지 계산 → Boid는 조향만
-            if (perceptionMode == PerceptionMode.Grid)
-                ComputePerceptionGrid(settings);
-            else
-                ComputePerceptionSinglePass(settings);
+            // SinglePass / Grid / Jobs: Manager가 1패스로 인지 계산 → Boid는 조향만
+            switch (perceptionMode)
+            {
+                case PerceptionMode.Grid:           ComputePerceptionGrid(settings);       break;
+                case PerceptionMode.JobsBruteForce: ComputePerceptionJobs(settings);       break;
+                default:                            ComputePerceptionSinglePass(settings); break;
+            }
 
             for (int i = 0; i < _boids.Length; i++)
                 _boids[i].UpdateBoid(in _perception[i], settings, ctx);
@@ -139,6 +157,29 @@ public class BoidsManager : MonoBehaviour
 
             _perception[i] = p;
         }
+    }
+
+    /// <summary>
+    /// 4a — 인지를 멀티코어로 병렬 처리(IJobParallelFor). 알고리즘은 SinglePass와 동일한
+    /// O(N²)이지만 코어 수만큼 분산된다. (Burst 미적용)
+    /// </summary>
+    private void ComputePerceptionJobs(BoidSettings s)
+    {
+        _naBoidData.CopyFrom(_boidData);
+
+        var job = new PerceptionJobBruteForce
+        {
+            boids      = _naBoidData,
+            results    = _naPerception,
+            perceptSqr = s.perceptionRadius * s.perceptionRadius,
+            sepSqr     = s.separationRadius * s.separationRadius
+        };
+
+        // batch=32: 워커가 한 번에 가져가는 인덱스 묶음 크기
+        JobHandle handle = job.Schedule(_boidData.Length, 32);
+        handle.Complete();
+
+        _naPerception.CopyTo(_perception);
     }
 
     /// <summary>이웃 boid 하나를 인지 누산값에 반영. SinglePass·Grid가 공유.</summary>
