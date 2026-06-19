@@ -25,7 +25,9 @@ public class BoidsManager : MonoBehaviour
     //   SinglePass = O(N²),  단일 패스 + sqrMagnitude (1·2단계)
     //   Grid       = O(N·k), Spatial Hash Grid로 주변 27셀만 검사 (3단계)
     //   JobsBruteForce = O(N²)를 멀티코어 병렬 처리 (4a, Burst 미적용)
-    public enum PerceptionMode { Legacy, SinglePass, Grid, JobsBruteForce }
+    //   JobsBurst  = 4a + Burst 네이티브 컴파일 (4b)
+    //   JobsGrid   = Jobs + Burst + Grid 결합 = O(N·k) 병렬 (4c, 최고 성능)
+    public enum PerceptionMode { Legacy, SinglePass, Grid, JobsBruteForce, JobsBurst, JobsGrid }
 
     [Header("Optimization")]
     public PerceptionMode perceptionMode = PerceptionMode.Grid;
@@ -36,9 +38,10 @@ public class BoidsManager : MonoBehaviour
     private PerceptionResult[] _perception;
     private SpatialGrid _grid;
 
-    // Jobs용 NativeArray (Persistent 할당, 매 프레임 재사용)
+    // Jobs용 NativeArray / 네이티브 그리드 (Persistent 할당, 매 프레임 재사용)
     private NativeArray<BoidData> _naBoidData;
     private NativeArray<PerceptionResult> _naPerception;
+    private NativeParallelMultiHashMap<int, int> _naGrid;
 
     // ─── 벤치마크 계측 ──────────────────────────────────────
     // 시뮬레이션(인지+조향) 루프만 따로 잰다. 렌더/vsync와 분리해
@@ -56,12 +59,14 @@ public class BoidsManager : MonoBehaviour
 
         _naBoidData   = new NativeArray<BoidData>(_boids.Length, Allocator.Persistent);
         _naPerception = new NativeArray<PerceptionResult>(_boids.Length, Allocator.Persistent);
+        _naGrid       = new NativeParallelMultiHashMap<int, int>(_boids.Length, Allocator.Persistent);
     }
 
     private void OnDestroy()
     {
         if (_naBoidData.IsCreated)   _naBoidData.Dispose();
         if (_naPerception.IsCreated) _naPerception.Dispose();
+        if (_naGrid.IsCreated)       _naGrid.Dispose();
     }
 
     private void Update()
@@ -90,9 +95,11 @@ public class BoidsManager : MonoBehaviour
             // SinglePass / Grid / Jobs: Manager가 1패스로 인지 계산 → Boid는 조향만
             switch (perceptionMode)
             {
-                case PerceptionMode.Grid:           ComputePerceptionGrid(settings);       break;
-                case PerceptionMode.JobsBruteForce: ComputePerceptionJobs(settings);       break;
-                default:                            ComputePerceptionSinglePass(settings); break;
+                case PerceptionMode.Grid:           ComputePerceptionGrid(settings);          break;
+                case PerceptionMode.JobsBruteForce: ComputePerceptionJobs(settings, false);   break;
+                case PerceptionMode.JobsBurst:      ComputePerceptionJobs(settings, true);    break;
+                case PerceptionMode.JobsGrid:       ComputePerceptionJobsGrid(settings);      break;
+                default:                            ComputePerceptionSinglePass(settings);    break;
             }
 
             for (int i = 0; i < _boids.Length; i++)
@@ -160,24 +167,69 @@ public class BoidsManager : MonoBehaviour
     }
 
     /// <summary>
-    /// 4a — 인지를 멀티코어로 병렬 처리(IJobParallelFor). 알고리즘은 SinglePass와 동일한
-    /// O(N²)이지만 코어 수만큼 분산된다. (Burst 미적용)
+    /// 4a/4b — 인지를 멀티코어로 병렬 처리(IJobParallelFor). 알고리즘은 SinglePass와 동일한
+    /// O(N²)이지만 코어 수만큼 분산된다. burst=true면 [BurstCompile] Job으로 네이티브 가속.
     /// </summary>
-    private void ComputePerceptionJobs(BoidSettings s)
+    private void ComputePerceptionJobs(BoidSettings s, bool burst)
     {
         _naBoidData.CopyFrom(_boidData);
 
-        var job = new PerceptionJobBruteForce
-        {
-            boids      = _naBoidData,
-            results    = _naPerception,
-            perceptSqr = s.perceptionRadius * s.perceptionRadius,
-            sepSqr     = s.separationRadius * s.separationRadius
-        };
+        float perceptSqr = s.perceptionRadius * s.perceptionRadius;
+        float sepSqr     = s.separationRadius * s.separationRadius;
 
         // batch=32: 워커가 한 번에 가져가는 인덱스 묶음 크기
-        JobHandle handle = job.Schedule(_boidData.Length, 32);
-        handle.Complete();
+        if (burst)
+        {
+            var job = new PerceptionJobBurst
+            {
+                boids = _naBoidData, results = _naPerception,
+                perceptSqr = perceptSqr, sepSqr = sepSqr
+            };
+            job.Schedule(_boidData.Length, 32).Complete();
+        }
+        else
+        {
+            var job = new PerceptionJobBruteForce
+            {
+                boids = _naBoidData, results = _naPerception,
+                perceptSqr = perceptSqr, sepSqr = sepSqr
+            };
+            job.Schedule(_boidData.Length, 32).Complete();
+        }
+
+        _naPerception.CopyTo(_perception);
+    }
+
+    /// <summary>
+    /// 4c — Jobs + Burst + Grid. 네이티브 그리드를 채운 뒤 병렬 Job이 주변 27셀만 검사.
+    /// O(N·k) + 멀티코어 + Burst (종합 최고 성능).
+    /// </summary>
+    private void ComputePerceptionJobsGrid(BoidSettings s)
+    {
+        _naBoidData.CopyFrom(_boidData);
+
+        // 네이티브 그리드 재구성 (메인 스레드, O(N))
+        float inv = 1f / s.perceptionRadius;
+        _naGrid.Clear();
+        for (int k = 0; k < _boidData.Length; k++)
+        {
+            Vector3 pos = _boidData[k].position;
+            int cx = Mathf.FloorToInt(pos.x * inv);
+            int cy = Mathf.FloorToInt(pos.y * inv);
+            int cz = Mathf.FloorToInt(pos.z * inv);
+            _naGrid.Add(PerceptionGridJob.Hash(cx, cy, cz), k);
+        }
+
+        var job = new PerceptionGridJob
+        {
+            boids       = _naBoidData,
+            grid        = _naGrid,
+            results     = _naPerception,
+            perceptSqr  = s.perceptionRadius * s.perceptionRadius,
+            sepSqr      = s.separationRadius * s.separationRadius,
+            invCellSize = inv
+        };
+        job.Schedule(_boidData.Length, 32).Complete();
 
         _naPerception.CopyTo(_perception);
     }
@@ -225,6 +277,8 @@ public class BoidsManager : MonoBehaviour
 
     private void OnDrawGizmos()
     {
+        // drawGridGizmos는 3단계 Grid(CPU Spatial Hash)에서만 지원.
+        // JobsGrid는 NativeParallelMultiHashMap이라 매 프레임 읽기 비용이 크므로 미지원.
         if (!drawGridGizmos || !Application.isPlaying || _grid == null) return;
 
         _grid.GetOccupiedCellCenters(_gizmoCells);
