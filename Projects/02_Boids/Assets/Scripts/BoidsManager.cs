@@ -49,6 +49,7 @@ public class BoidsManager : MonoBehaviour
     private readonly Stopwatch _simWatch = new Stopwatch();
     public float SimMs { get; private set; }      // EWMA 평활된 시뮬 ms
     public int BoidCount => _boids != null ? _boids.Length : 0;
+    public BoidController[] Boids => _boids;       // 렌더러 등 외부에서 참조
 
     private void Start()
     {
