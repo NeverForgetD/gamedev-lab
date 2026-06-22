@@ -223,13 +223,206 @@ public enum GizmoType { Never, SelectedOnly, Always }
 
 ---
 
-### 3. ⚡ 공간 분할 최적화 & 렌더링 최적화 _(임시)_
+### 3. ⚡ 성능 최적화 — O(N²)에서 멀티코어·GPU까지
 
-> 모든 Boid가 모든 Boid를 검사하는 O(N²) 방식의 한계를 확인하고, Spatial Hash 또는 Uniform Grid를 이용해 주변 탐색을 최적화합니다.  
-> 그 외 GPU Instancing, 오브젝트 풀링, 디버깅 시각화, 파라미터 프리셋 등을 적용해 다수의 Boid가 안정적으로 동작하도록 폴리싱합니다.  
-> 전체 Boid 위치/방향을 `ComputeBuffer`에 담아 GPU Compute Shader로 처리합니다.
+> 1주차에서 남긴 **O(N²) 문제**를 단계별로 해결합니다.
+> **알고리즘 → 자료구조 → 병렬화 → 렌더링** 순서로 점진적으로 개선하며,
+> 각 단계의 효과를 **측정**합니다.
 
 <!-- > ▶ [Week 3](링크) -->
+
+#### 📐 측정 환경
+
+아래 모든 수치는 동일한 조건에서 측정했습니다.
+
+| 항목 | 값 |
+|------|-----|
+| Boid 수 | 1,000 / 3,000 / 5,000 (구간별 비교) |
+| CPU / 빌드 | _(측정 시 기입)_ |
+| 측정 지표 | `sim ms` — 인지+조향 루프만 계측 (렌더·vsync 분리) |
+| 평활 | EWMA α=0.1 (프레임 간 튐 완화) |
+
+> `sim ms`는 `Stopwatch`로 **시뮬레이션 루프만** 따로 잽니다. 렌더링·vsync가 섞이면 알고리즘 개선 효과가 가려지기 때문에, 순수 연산 시간만 분리해 측정합니다.
+
+<!-- 📷 [이미지] BenchmarkHUD 오버레이 스크린샷 (boids / sim ms / fps) -->
+
+#### 🪜 최적화 단계 요약
+
+| Step | 제목 | 핵심 기법 | 복잡도 |
+|------|------|-----------|--------|
+| **0** | 📏 벤치마크 하니스 | Stopwatch + HUD 계측 | — |
+| **1·2** | 🧮 알고리즘 개선 | 단일 패스 + sqrMagnitude | O(3N²) → O(N²) |
+| **3** | 🗂️ 공간 분할 | Spatial Hash Grid (27셀) | O(N·k) |
+| **4** | 🧵 병렬화 | Unity Jobs + Burst | O(N·k) ÷ 코어 |
+| **5** | 🎨 렌더링 | GPU Instancing | Drawcall N → ⌈N/1023⌉ |
+
+---
+
+#### Step 0 — 📏 측정 준비 · Stopwatch + HUD
+
+> 렌더·vsync와 분리해 **시뮬레이션 루프만** 계측합니다.
+
+**문제** — 개선 효과를 숫자로 확인할 수단이 먼저 필요합니다.
+
+**해결** — 시뮬레이션 루프(인지+조향)만 `Stopwatch`로 감싸 `sim ms`로 측정하고, EWMA로 평활해 HUD에 실시간 표시합니다. 렌더링·vsync와 분리했기 때문에 알고리즘 개선이 그대로 숫자에 반영됩니다.
+
+```csharp
+_simWatch.Restart();
+// ... 인지 계산 + 조향 업데이트 ...
+_simWatch.Stop();
+
+// ms 변환 후 지수이동평균(α=0.1)으로 튐 완화
+float ms = (float)_simWatch.Elapsed.TotalMilliseconds;
+SimMs = Mathf.Lerp(SimMs, ms, 0.1f);
+```
+
+같은 씬에서 `PerceptionMode` enum을 토글하며 각 방식을 비교할 수 있게 했습니다.
+
+<!-- 📷 [이미지] BenchmarkHUD 오버레이 스크린샷 -->
+
+---
+
+#### Step 1·2 — 🧮 알고리즘 개선 · 단일 패스 + sqrMagnitude
+
+> O(3N²) → **O(N²)**
+
+**문제** — 기존 구현은 Separation·Alignment·Cohesion 세 규칙이 **각각** 전체 Boid를 순회합니다. 같은 이웃을 3번 검사하는 셈이고, 거리 계산마다 `Vector3.Distance`(내부 `sqrt`)를 호출합니다.
+
+**해결** — 한 번의 순회로 세 규칙에 필요한 값을 `PerceptionResult`에 동시 누산하고(3패스→1패스), 거리 비교는 제곱 거리(`sqrMagnitude`)로 바꿔 `sqrt`를 제거합니다.
+
+```csharp
+// 이웃 하나를 SAC 누산값에 1패스로 반영
+Vector3 offset = posI - other.position;
+float sqr = offset.sqrMagnitude;            // sqrt 없이 제곱거리로 비교
+if (sqr <= 0f || sqr >= perceptSqr) return;
+
+p.alignmentSum += other.direction;          // Alignment
+p.cohesionSum  += other.position;           // Cohesion
+p.flockCount++;
+
+if (sqr < sepSqr)
+{
+    p.separationSum += offset / sqr;        // normalized/dist == offset/sqr → sqrt 불필요
+    p.separationCount++;
+}
+```
+
+> `offset.normalized / dist` 는 수학적으로 `offset / sqr` 와 같습니다. 분리 가중치(거리 반비례)를 유지하면서 `sqrt`를 완전히 없앤 부분이 포인트입니다.
+
+또한 **인지 계산을 `BoidsManager`로 모으고**, 각 `Boid`는 결과를 받아 조향만 하도록 책임을 분리했습니다. 이 구조가 이후 Jobs 병렬화의 토대가 됩니다.
+
+<!-- 🎬 [GIF] 같은 boid 수에서 Legacy vs SinglePass sim ms 비교 (HUD 보이게) -->
+
+---
+
+#### Step 3 — 🗂️ 공간 분할 · Spatial Hash Grid
+
+> O(N²) → **O(N·k)** (k = 셀당 평균 이웃 수)
+
+**문제** — 1패스로 줄여도 시간 복잡도는 여전히 O(N²)입니다.
+검사할 필요가 없는 멀리 떨어진 Boid까지 매번 전부 순회합니다.
+
+**해결** — 공간을 `perceptionRadius` 크기의 셀로 나누는 **Spatial Hash Grid**를 도입합니다. 셀 크기를 인지 반경과 같게 잡으면 반경 내 이웃은 반드시 **자기 셀 + 인접 26셀(3×3×3)** 안에 있습니다. 매 프레임 그리드를 재구성한 뒤, 각 Boid는 주변 27셀만 검사합니다.
+
+```csharp
+_grid.Rebuild(_boidData);                    // O(N): 각 Boid를 셀에 해시
+
+foreach (int j in _grid.Neighbors(posI))     // 주변 27셀 후보만 순회
+{
+    if (i == j) continue;
+    Accumulate(ref p, posI, _boidData[j], perceptSqr, sepSqr);
+}
+```
+
+무한 공간을 다루기 위해 고정 배열이 아닌 `Dictionary<long, List<int>>` 해시 방식을 쓰고, 셀 좌표는 축당 21비트로 인코딩해 하나의 `long` 키로 묶습니다. 리스트는 매 프레임 `Clear`만 하고 재사용해 GC 압력을 줄였습니다.
+
+평균 복잡도는 **O(N·k)** (k = 셀당 평균 이웃 수)로, 개체 수가 늘어도 거의 선형으로 확장됩니다. `drawGridGizmos`로 점유 셀을 시각화해 동작을 눈으로 확인할 수 있습니다.
+
+<!-- 🎬 [GIF] drawGridGizmos 켜서 그리드 셀 시각화 + 군집 이동 -->
+
+---
+
+#### Step 4 — 🧵 병렬화 · Unity Jobs + Burst
+
+> O(N·k) → **O(N·k) ÷ 코어 수**
+
+**문제** — 알고리즘을 O(N·k)까지 줄여도 **단일 스레드**라 CPU 코어 하나만 씁니다. 나머지 코어는 놀고 있습니다.
+
+**해결** — 인지 계산을 `IJobParallelFor`로 쪼개 멀티코어에 분산합니다. 각 워커는 입력을 읽기만 하고 자기 인덱스 결과에만 쓰므로 경쟁(race)이 없습니다. 여기에 단계적으로 가속을 누적합니다.
+
+- **4a — Jobs (병렬만)**: O(N²) 연산을 코어 수만큼 분산
+- **4b — Jobs + Burst**: `[BurstCompile]`로 C#을 네이티브/SIMD 코드로 컴파일
+- **4c — Jobs + Burst + Grid**: 네이티브 그리드(`NativeParallelMultiHashMap`)로 27셀만 검사하는 병렬 버전 (**종합 최고 성능**)
+
+```csharp
+[BurstCompile]
+public struct PerceptionGridJob : IJobParallelFor
+{
+    [ReadOnly] public NativeArray<BoidData> boids;
+    [ReadOnly] public NativeParallelMultiHashMap<int, int> grid;
+    public NativeArray<PerceptionResult> results;
+
+    public void Execute(int i)
+    {
+        // 주변 27셀의 후보만 해시로 꺼내 검사 (O(N·k) × 멀티코어 × Burst)
+        ...
+    }
+}
+```
+
+```csharp
+job.Schedule(_boidData.Length, 32).Complete();   // batch=32: 워커가 한 번에 가져갈 인덱스 묶음
+```
+
+> 그리드 해시는 충돌이 나도 "엉뚱한 후보가 섞일" 뿐이고, 거리 검사(`sqr < perceptSqr`)가 걸러내므로 **결과는 항상 정확**합니다(성능만 미세 손해).
+
+`NativeArray`는 `Allocator.Persistent`로 한 번 할당해 매 프레임 재사용하고, `OnDestroy`에서 `Dispose`해 누수를 막습니다.
+
+---
+
+#### Step 5 — 🎨 렌더링 · GPU Instancing
+
+> Drawcall N → **⌈N/1023⌉**
+
+**문제** — 여기까지는 전부 **시뮬레이션(`sim ms`)** 최적화입니다. 하지만 5,000마리를 각자 그리면 **Drawcall이 5,000번** 발생해 CPU 렌더 오버헤드가 fps를 잡아먹습니다.
+
+**해결** — 같은 메시·머티리얼을 `Graphics.RenderMeshInstanced`로 **1,023개씩 묶어** 한 번에 그립니다. 시뮬용 Transform은 그대로 두되 개별 `MeshRenderer`는 끄고(이중 렌더 방지), 행렬만 모아 배치로 넘깁니다.
+
+```csharp
+var rp = new RenderParams(_instanceMat);     // enableInstancing 사본
+for (int start = 0; start < total; start += MaxPerBatch)   // MaxPerBatch = 1023 (API 상한)
+{
+    int count = Mathf.Min(MaxPerBatch, total - start);
+    for (int k = 0; k < count; k++)
+        _batch[k] = _renderTransforms[start + k].localToWorldMatrix;
+
+    Graphics.RenderMeshInstanced(rp, boidMesh, 0, _batch, count);
+}
+```
+
+결과적으로 **Drawcall이 N → ⌈N/1023⌉** 로 줄어듭니다. 5,000마리도 단 **5번**의 Drawcall로 그려집니다. 인지·조향과 무관한 렌더 단계라 `sim ms`에는 영향이 없고, **fps와 Batches(Stats 창)** 에서 차이가 드러납니다.
+
+<!-- 📷 [이미지] Game뷰 Stats 창 Batches: GPU Instancing on / off 2장 비교 -->
+
+---
+
+#### 📊 종합 결과 (5,000마리 기준)
+
+> 📌 아래 수치는 **측정 후 채울 placeholder**입니다. 같은 씬에서 `PerceptionMode`만 바꿔 측정합니다.
+
+| Step | 방식 | sim ms | vs Legacy | fps |
+|------|------|-------:|----------:|----:|
+| 0 | Legacy (baseline) | `00.0` | 1.0× | `00` |
+| 1·2 | SinglePass | `00.0` | `0.0×` | `00` |
+| 3 | Grid | `00.0` | `00×` | `00` |
+| 4a | Jobs | `00.0` | `00×` | `00` |
+| 4b | Jobs + Burst | `00.0` | `00×` | `00` |
+| 4c | Jobs + Burst + Grid | `00.0` | `00×` | `00` |
+| 5 | 4c + GPU Instancing | _(sim 동일)_ | — | `000` |
+
+<!-- 📊 [그래프] boid 수(1k/3k/5k) × sim ms 꺾은선 — N² 곡선이 폭발하고 Grid/Jobs가 평탄한 모습 -->
+
+<!-- 🎬 [GIF] 5,000마리 풀군집 데모 (피날레) -->
 
 ---
 
