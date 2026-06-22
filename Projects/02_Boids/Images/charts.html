@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>Boids 성능 그래프</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<style>
+  body { background: #1e1e2e; color: #cdd6f4; font-family: 'Segoe UI', sans-serif; padding: 40px; }
+  h2 { color: #cba6f7; margin-bottom: 8px; }
+  p  { color: #a6adc8; font-size: 13px; margin-bottom: 24px; }
+  .chart-wrap { background: #181825; border-radius: 12px; padding: 28px; margin-bottom: 48px; max-width: 800px; }
+</style>
+</head>
+<body>
+
+<div class="chart-wrap">
+  <h2>① 개체 수 증가에 따른 sim ms (알고리즘 비교)</h2>
+  <p>X축: Boid 수 / Y축: sim ms (낮을수록 좋음) — Legacy는 3,000에서 측정불가</p>
+  <canvas id="chart1" height="120"></canvas>
+</div>
+
+<div class="chart-wrap">
+  <h2>② 최적화 단계별 sim ms (3,000마리 기준)</h2>
+  <p>X축: 최적화 방식 / Y축: sim ms (낮을수록 좋음)</p>
+  <canvas id="chart2" height="100"></canvas>
+</div>
+
+<script>
+// ── 그래프 1: 꺾은선 ─────────────────────────────────
+new Chart(document.getElementById('chart1'), {
+  type: 'line',
+  data: {
+    labels: ['100', '300', '3,000'],
+    datasets: [
+      {
+        label: 'Legacy  O(3N²)',
+        data: [5.044, 43.048, null],
+        borderColor: '#f38ba8',
+        backgroundColor: 'rgba(243,139,168,0.15)',
+        borderWidth: 2.5,
+        pointRadius: 5,
+        spanGaps: false,
+        borderDash: [6, 3],
+      },
+      {
+        label: 'SinglePass  O(N²)',
+        data: [0.694, 4.332, 320.041],
+        borderColor: '#fab387',
+        backgroundColor: 'rgba(250,179,135,0.15)',
+        borderWidth: 2.5,
+        pointRadius: 5,
+      },
+      {
+        label: 'Grid  O(N·k)',
+        data: [0.582, 2.272, 82.314],
+        borderColor: '#a6e3a1',
+        backgroundColor: 'rgba(166,227,161,0.15)',
+        borderWidth: 2.5,
+        pointRadius: 5,
+      },
+    ]
+  },
+  options: {
+    responsive: true,
+    plugins: {
+      legend: { labels: { color: '#cdd6f4', font: { size: 13 } } },
+      tooltip: { callbacks: { label: ctx => ` ${ctx.dataset.label}: ${ctx.parsed.y ?? '측정불가'} ms` } }
+    },
+    scales: {
+      x: { ticks: { color: '#a6adc8' }, grid: { color: '#313244' } },
+      y: {
+        ticks: { color: '#a6adc8', callback: v => v + ' ms' },
+        grid: { color: '#313244' },
+        title: { display: true, text: 'sim ms', color: '#a6adc8' }
+      }
+    }
+  }
+});
+
+// ── 그래프 2: 막대 ───────────────────────────────────
+new Chart(document.getElementById('chart2'), {
+  type: 'bar',
+  data: {
+    labels: ['Legacy', 'SinglePass', 'Grid', 'Jobs\n(4a)', 'Jobs+Burst\n(4b)', 'Jobs+Burst\n+Grid (4c)'],
+    datasets: [{
+      label: 'sim ms',
+      data: [null, 320.041, 82.314, 33.983, 9.381, 8.914],
+      backgroundColor: [
+        'rgba(243,139,168,0.3)',
+        'rgba(250,179,135,0.6)',
+        'rgba(249,226,175,0.6)',
+        'rgba(137,220,235,0.6)',
+        'rgba(166,227,161,0.8)',
+        'rgba(166,227,161,1.0)',
+      ],
+      borderColor: [
+        '#f38ba8',
+        '#fab387',
+        '#f9e2af',
+        '#89dceb',
+        '#a6e3a1',
+        '#a6e3a1',
+      ],
+      borderWidth: 2,
+    }]
+  },
+  options: {
+    responsive: true,
+    plugins: {
+      legend: { display: false },
+      tooltip: { callbacks: { label: ctx => ` ${ctx.parsed.y ?? '측정불가'} ms` } },
+      annotation: {}
+    },
+    scales: {
+      x: { ticks: { color: '#a6adc8' }, grid: { color: '#313244' } },
+      y: {
+        ticks: { color: '#a6adc8', callback: v => v + ' ms' },
+        grid: { color: '#313244' },
+        title: { display: true, text: 'sim ms', color: '#a6adc8' }
+      }
+    }
+  }
+});
+</script>
+</body>
+</html>
