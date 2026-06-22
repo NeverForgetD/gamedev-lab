@@ -34,8 +34,12 @@ public class BenchmarkHUD : MonoBehaviour
         int n = manager != null ? manager.BoidCount : 0;
         float sim = manager != null ? manager.SimMs : 0f;
         float fps = _frameMs > 0f ? 1000f / _frameMs : 0f;
-        Debug.Log($"[Benchmark] boids={n,5} | sim={sim,7:F3} ms | frame={_frameMs,6:F2} ms | {fps,5:F1} fps");
+        string mode = manager != null ? manager.perceptionMode.ToString() : "N/A";
+        Debug.Log($"[Benchmark] boids={n} | mode={mode} | sim={sim:F3} ms | frame={_frameMs:F2} ms | {fps:F1} fps");
     }
+
+    private static readonly string[] _modeLabels =
+        { "Legacy", "SinglePass", "Grid", "Jobs", "Burst", "JobsGrid" };
 
     private void OnGUI()
     {
@@ -52,25 +56,37 @@ public class BenchmarkHUD : MonoBehaviour
         int n = manager != null ? manager.BoidCount : 0;
         float sim = manager != null ? manager.SimMs : 0f;
         float fps = _frameMs > 0f ? 1000f / _frameMs : 0f;
+        int currentMode = manager != null ? (int)manager.perceptionMode : 0;
 
         const float pad = 10f;
-        var rect = new Rect(pad, pad, 460f, 160f);
+        float lineH = fontSize + 6f;
+        float bgH = lineH * 5 + 46f;
+        var rect = new Rect(pad, pad, 460f, bgH);
 
-        // 가독성을 위한 반투명 배경
+        // 반투명 배경
         var bg = GUI.color;
         GUI.color = new Color(0f, 0f, 0f, 0.45f);
-        GUI.DrawTexture(new Rect(rect.x - 4f, rect.y - 4f, rect.width, 130f), Texture2D.whiteTexture);
+        GUI.DrawTexture(new Rect(rect.x - 4f, rect.y - 4f, rect.width, bgH), Texture2D.whiteTexture);
         GUI.color = bg;
 
         GUI.Label(rect, $"Boids : {n}", _style);
-        rect.y += fontSize + 6f;
+        rect.y += lineH;
         GUI.Label(rect, $"Sim   : {sim:F3} ms", _style);
-        rect.y += fontSize + 6f;
+        rect.y += lineH;
         GUI.Label(rect, $"Frame : {_frameMs:F2} ms", _style);
-        rect.y += fontSize + 6f;
+        rect.y += lineH;
         GUI.Label(rect, $"FPS   : {fps:F1}", _style);
+        rect.y += lineH;
+        GUI.Label(rect, $"Mode  : {_modeLabels[currentMode]}", _style);
+        rect.y += lineH + 4f;
 
-        if (GUI.Button(new Rect(pad, 135f, 150f, 30f), "Log row"))
+        // 화살표 버튼으로 모드 변경
+        if (GUI.Button(new Rect(pad, rect.y, 34f, 28f), "<") && manager != null)
+            manager.perceptionMode = (BoidsManager.PerceptionMode)((_modeLabels.Length + currentMode - 1) % _modeLabels.Length);
+        if (GUI.Button(new Rect(pad + 38f, rect.y, 34f, 28f), ">") && manager != null)
+            manager.perceptionMode = (BoidsManager.PerceptionMode)((currentMode + 1) % _modeLabels.Length);
+
+        if (GUI.Button(new Rect(pad + 80f, rect.y, 120f, 28f), "Log row"))
             LogRow();
     }
 }

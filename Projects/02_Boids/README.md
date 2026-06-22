@@ -238,13 +238,11 @@ public enum GizmoType { Never, SelectedOnly, Always }
 | 항목 | 값 |
 |------|-----|
 | Boid 수 | 1,000 / 3,000 / 5,000 (구간별 비교) |
-| CPU / 빌드 | _(측정 시 기입)_ |
+| CPU / 빌드 | Intel Core i7-13700KF / Dev |
 | 측정 지표 | `sim ms` — 인지+조향 루프만 계측 (렌더·vsync 분리) |
-| 평활 | EWMA α=0.1 (프레임 간 튐 완화) |
+| 프레임 평활 | EWMA α=0.1 (프레임 간 튐 완화) |
 
 > `sim ms`는 `Stopwatch`로 **시뮬레이션 루프만** 따로 잽니다. 렌더링·vsync가 섞이면 알고리즘 개선 효과가 가려지기 때문에, 순수 연산 시간만 분리해 측정합니다.
-
-<!-- 📷 [이미지] BenchmarkHUD 오버레이 스크린샷 (boids / sim ms / fps) -->
 
 #### 🪜 최적화 단계 요약
 
@@ -278,7 +276,7 @@ SimMs = Mathf.Lerp(SimMs, ms, 0.1f);
 
 같은 씬에서 `PerceptionMode` enum을 토글하며 각 방식을 비교할 수 있게 했습니다.
 
-<!-- 📷 [이미지] BenchmarkHUD 오버레이 스크린샷 -->
+![BenchmarkHUD](Images/03_BenchmarkHUD.gif)
 
 ---
 
@@ -338,7 +336,33 @@ foreach (int j in _grid.Neighbors(posI))     // 주변 27셀 후보만 순회
 
 평균 복잡도는 **O(N·k)** (k = 셀당 평균 이웃 수)로, 개체 수가 늘어도 거의 선형으로 확장됩니다. `drawGridGizmos`로 점유 셀을 시각화해 동작을 눈으로 확인할 수 있습니다.
 
-<!-- 🎬 [GIF] drawGridGizmos 켜서 그리드 셀 시각화 + 군집 이동 -->
+![GridGizmo](Images/03_GridGizmo.gif)
+
+---
+
+#### ⚠️ O(N²)의 폭발
+
+> O(N²) 알고리즘은 개체 수가 늘어날수록 연산량이 **제곱**으로 증가합니다. 100마리에서는 어느정도 프레임을 지킬 수 있지만, 300마리가 되면 연산량이 이론상 9배로 뜁니다. 이에 비해 Grid(O(N·k))는 개체 수가 늘어도 연산량은 거의 선형으로 유지됩니다.
+
+**표 1 — 이론 연산량 배수**
+
+| 개체 수 | 개체 배수 | O(3N²) Legacy | O(N²) SinglePass | O(N·k) Grid |
+|:------:|:--------:|:-------------:|:----------------:|:-----------:|
+| 100 | 1× | 1× | 1× | 1× |
+| 300 | 3× | **9×** | **9×** | ≈3× |
+| 1,000 | 10× | **100×** | **100×** | ≈10× |
+
+> Legacy와 SinglePass는 O(N²)로 구조가 같지만, SinglePass는 상수 계수를 3→1로 줄여 낮은 개체 수에서는 생각보다 효과가 있었습니다. 다만 개체 수가 커질수록 상수 절감의 효과는 희석되고 O(N²) 한계에 부딪힙니다. Grid는 복잡도 자체를 낮추기 때문에 개체 수가 늘수록 격차가 더 벌어집니다.
+
+---
+
+**표 2 — 실측 결과** *(sim ms / fps)*
+
+| 개체 수 | Legacy | SinglePass | Grid |
+|:------:|:------:|:----------:|:----:|
+| 100 | 5.044 ms / 66 fps | 0.694 ms / 95 fps | 0.582 ms / 97 fps |
+| 300 | **🔴 43.048 ms / 18 fps** | 4.332 ms / 65 fps | 2.272 ms / 73 fps |
+| 1,000 | **💀 461.867 ms / 2 fps** | 37.246 ms / 19 fps | **✅ 10.309 ms / 43 fps** |
 
 ---
 
@@ -402,7 +426,7 @@ for (int start = 0; start < total; start += MaxPerBatch)   // MaxPerBatch = 1023
 
 결과적으로 **Drawcall이 N → ⌈N/1023⌉** 로 줄어듭니다. 5,000마리도 단 **5번**의 Drawcall로 그려집니다. 인지·조향과 무관한 렌더 단계라 `sim ms`에는 영향이 없고, **fps와 Batches(Stats 창)** 에서 차이가 드러납니다.
 
-<!-- 📷 [이미지] Game뷰 Stats 창 Batches: GPU Instancing on / off 2장 비교 -->
+![GPUInstancing](Images/03_GPUInstancing비교.gif)
 
 ---
 

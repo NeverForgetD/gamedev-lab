@@ -17,9 +17,6 @@ public class BoidsManager : MonoBehaviour
     [Header("Predator")]
     public Transform predator;
 
-    [Header("Boundary")]
-    public float boundaryRadius = 20f;
-
     // 인지(이웃 탐색) 방식. 같은 씬에서 토글하며 성능을 비교 측정한다.
     //   Legacy     = O(3N²), Vector3.Distance (최적화 이전, baseline)
     //   SinglePass = O(N²),  단일 패스 + sqrMagnitude (1·2단계)
@@ -253,24 +250,6 @@ public class BoidsManager : MonoBehaviour
             p.separationSum += offset / sqr;  // Separation
             p.separationCount++;
         }
-    }
-
-    private void ApplyBoundary(BoidController boid)
-    {
-        Vector3 offset = boid.transform.position - transform.position;
-        if (offset.magnitude > boundaryRadius)
-        {
-            Vector3 outward = offset.normalized;
-            float outwardSpeed = Vector3.Dot(boid.velocity, outward);
-            if (outwardSpeed > 0f)
-                boid.velocity -= 2f * outwardSpeed * outward;
-        }
-    }
-
-    private void OnDrawGizmosSelected()
-    {
-        Gizmos.color = Color.blue;
-        Gizmos.DrawWireSphere(transform.position, boundaryRadius);
     }
 
     private readonly System.Collections.Generic.List<Vector3> _gizmoCells
